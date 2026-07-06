@@ -154,7 +154,15 @@ class HybridCNNLSTMTransformer(nn.Module):
             nn.Linear(MODEL_CFG.regime_hidden, MODEL_CFG.xgb_embed_dim),
         )
         pre_gate_dim = MODEL_CFG.transformer_d_model + MODEL_CFG.skip_embed_dim + MODEL_CFG.xgb_embed_dim
-        self.xgb_trust_gate = nn.Linear(pre_gate_dim, 1)
+        # PER-HORIZON blend gate: one trust value per forecast step, not a
+        # single scalar for the whole 10-step horizon. The two experts have
+        # different horizon profiles -- the deep pathway sees the (fast-
+        # decaying) sentiment/mood signal that matters most at short
+        # horizons, while the tree ensemble's window summaries extrapolate
+        # more stably further out -- and a scalar gate forced one trust
+        # level onto both. (B, k) x (B, k) broadcasting keeps the blend
+        # arithmetic unchanged.
+        self.xgb_trust_gate = nn.Linear(pre_gate_dim, MODEL_CFG.horizon)
         # Start the blend gate NEUTRAL (sigmoid(0) = 0.5) and
         # input-independent: neither expert is privileged at epoch 0, and
         # the weights learn per-sample arbitration as training progresses.
@@ -206,7 +214,7 @@ class HybridCNNLSTMTransformer(nn.Module):
         Returns dict with:
             forecast:        (B, k)   final multi-step point forecast (log-return space)
             gate:             (B, 1)   high-volatility routing weight (models/regime_aware.py)
-            xgb_trust:        (B, 1)   learned weight on the XGBoost fusion branch, in [0,1]
+            xgb_trust:        (B, k)   learned per-horizon weight on the XGBoost expert, in [0,1]
             band:             (B, k)   uncertainty band estimate
             direction_logits: (B, k)   auxiliary directional-classification logits
         """
@@ -238,8 +246,10 @@ class HybridCNNLSTMTransformer(nn.Module):
         xgb_embed_raw = self.xgb_embed(xgb_normed)  # (B, xgb_embed_dim)
 
         gate_input = torch.cat([deep_context, skip, xgb_embed_raw], dim=-1)
-        xgb_trust = torch.sigmoid(self.xgb_trust_gate(gate_input))  # (B, 1)
-        xgb_embed = xgb_embed_raw * xgb_trust  # learned, per-sample scaling of the XGBoost signal
+        xgb_trust = torch.sigmoid(self.xgb_trust_gate(gate_input))  # (B, k) per-horizon trust
+        # Scale the context embedding by the mean trust across horizons
+        # (the embedding is a single vector, not per-horizon).
+        xgb_embed = xgb_embed_raw * xgb_trust.mean(dim=-1, keepdim=True)
 
         context = torch.cat([deep_context, skip, xgb_embed], dim=-1)  # (B, 256+32+32=320)
         deep_forecast, gate, band = self.regime_output(context, regime_ctx)

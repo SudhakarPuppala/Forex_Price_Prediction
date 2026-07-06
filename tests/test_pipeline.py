@@ -350,7 +350,7 @@ def test_hybrid_model_end_to_end_forward():
     out = m(x, regime_ctx)
     assert out["forecast"].shape == (4, DATA_CFG.horizon)
     assert out["direction_logits"].shape == (4, DATA_CFG.horizon)
-    assert out["xgb_trust"].shape == (4, 1)
+    assert out["xgb_trust"].shape == (4, DATA_CFG.horizon)  # per-horizon blend gate
     assert not torch.isnan(out["forecast"]).any()
     assert not torch.isnan(out["direction_logits"]).any()
 
@@ -556,8 +556,8 @@ def test_hybrid_residual_anchor_and_signal_conditioning():
         out = m(x, regime_ctx, xgb_pred)
     assert torch.allclose(out["deep_forecast"], torch.zeros(4, DATA_CFG.horizon), atol=1e-6), \
         "fresh deep expert must start at zero: zero-init of decoder heads broken?"
-    assert torch.allclose(out["xgb_trust"], torch.full((4, 1), 0.5)), \
-        "fresh blend gate should be the neutral constant sigmoid(0) = 0.5"
+    assert torch.allclose(out["xgb_trust"], torch.full((4, DATA_CFG.horizon), 0.5)), \
+        "fresh blend gate should be the neutral constant sigmoid(0) = 0.5 at every horizon"
     expected = out["xgb_trust"] * xgb_pred + (1 - out["xgb_trust"]) * out["deep_forecast"]
     assert torch.allclose(out["forecast"], expected, atol=1e-6), \
         "forecast must be the convex blend of the two experts"
