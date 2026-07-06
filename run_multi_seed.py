@@ -29,7 +29,7 @@ def multi_seed_evaluation(seeds, **run_kwargs):
     all_runs = []
     for seed in seeds:
         print(f"\n{'='*70}\nSEED {seed}\n{'='*70}")
-        reports = run_pipeline(seed=seed, report_dir=f"report_seed_{seed}", **run_kwargs)
+        reports = run_pipeline(seed=seed, report_dir=f"report/report_seed_{seed}", **run_kwargs)
         all_runs.append(reports)
 
     model_names = list(all_runs[0].keys())
@@ -64,11 +64,11 @@ def multi_seed_evaluation(seeds, **run_kwargs):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seeds", type=int, nargs="+", default=[42, 7, 123])
+    parser.add_argument("--seeds", type=int, nargs="+", default=[9, 36, 99])
     parser.add_argument("--pair", type=str, default="XAU/USD")
-    parser.add_argument("--n_days", type=int, default=1500)
-    parser.add_argument("--epochs", type=int, default=None)
-    parser.add_argument("--source", type=str, default="synthetic", choices=["synthetic", "real"])
+    parser.add_argument("--n_days", type=int, default=5000)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--source", type=str, default="real", choices=["synthetic", "real"])
     parser.add_argument("--signal_strength", type=float, default=None)
     args = parser.parse_args()
 
