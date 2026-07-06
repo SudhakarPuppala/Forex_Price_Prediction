@@ -50,14 +50,16 @@ Plus three additions found necessary during evaluation:
    embedded into the context vector, so the decoder and the gate can
    CONDITION on what the trees predicted.
 
-4. A sentiment trading-signal conditioning path (this round): the discrete
-   buy/sell/hold/none signal derived from the news feed
-   (data/sentiment.py:derive_trading_signals) is embedded and added to the
-   CNN's output at every timestep -- the same early-conditioning mechanism
-   as the volatility regime embedding, which was the single biggest win of
-   the earlier rounds. The per-timestep one-hot signal columns are also part
-   of the 26-feature input window itself, so the CNN sees the signal's
-   full 60-bar history, while this embedding highlights the CURRENT signal.
+4. A sentiment conditioning path (this round): the sentiment pipeline's
+   output -- the continuous FinBERT-derived rolling scores together with
+   the discrete buy/sell/hold/none signal derived from them
+   (data/sentiment.py:derive_trading_signals) -- is embedded and added to
+   the CNN's output at every timestep, the same early-conditioning
+   mechanism as the volatility regime embedding, which was the single
+   biggest win of the earlier rounds. The per-timestep sentiment columns
+   are also part of the 26-feature input window itself, so the CNN sees
+   the full 60-bar sentiment history, while this embedding highlights the
+   CURRENT sentiment state.
 """
 from __future__ import annotations
 
@@ -97,13 +99,16 @@ class HybridCNNLSTMTransformer(nn.Module):
             nn.Linear(MODEL_CFG.regime_hidden, MODEL_CFG.cnn_out_channels),
         )
 
-        # Sentiment trading-signal embedding: maps the current (last-bar)
-        # one-hot buy/sell/hold/none signal into a learned vector added to
-        # the CNN's output at every timestep, exactly like the regime
-        # embedding above -- so the Bi-LSTM/Transformer stages process the
-        # sequence CONDITIONED on what the news flow is currently saying.
+        # Sentiment conditioning embedding: maps the current (last-bar)
+        # sentiment snapshot -- the 8 continuous FinBERT-derived rolling
+        # scores AND the 4 one-hot buy/sell/hold/none signal columns -- into
+        # a learned vector added to the CNN's output at every timestep,
+        # exactly like the regime embedding above. The Bi-LSTM/Transformer
+        # stages therefore process the sequence CONDITIONED on both what
+        # the news flow is currently saying (score) and what it implies
+        # (discrete signal).
         self.signal_embed = nn.Sequential(
-            nn.Linear(DATA_CFG.n_signal_classes, MODEL_CFG.regime_hidden),
+            nn.Linear(DATA_CFG.n_sentiment_features, MODEL_CFG.regime_hidden),
             nn.GELU(),
             nn.Linear(MODEL_CFG.regime_hidden, MODEL_CFG.cnn_out_channels),
         )
@@ -222,11 +227,12 @@ class HybridCNNLSTMTransformer(nn.Module):
         local = self.cnn(fused)             # (B, T/2, 128)
 
         regime_embed = self.regime_embed(regime_ctx)          # (B, 128)
-        # Current (last-bar) one-hot buy/sell/hold/none trading signal --
-        # the LAST n_signal_classes columns of the sentiment stream
-        # (data/sentiment.py:SIGNAL_NAMES ordering).
-        signal_onehot = x[:, -1, -DATA_CFG.n_signal_classes:]  # (B, 4)
-        signal_embed = self.signal_embed(signal_onehot)        # (B, 128)
+        # Current (last-bar) sentiment snapshot: 8 continuous FinBERT
+        # rolling scores + 4 one-hot buy/sell/hold/none signal columns --
+        # the LAST n_sentiment_features columns of the fused panel
+        # (data/sentiment.py:build_sentiment_features ordering).
+        sentiment_snapshot = x[:, -1, -DATA_CFG.n_sentiment_features:]  # (B, 12)
+        signal_embed = self.signal_embed(sentiment_snapshot)            # (B, 128)
         # broadcast-add both conditioning vectors across all T/2 timesteps
         local = local + (regime_embed + signal_embed).unsqueeze(1)
 

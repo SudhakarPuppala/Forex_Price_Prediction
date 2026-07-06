@@ -8,6 +8,5 @@ __pycache__/
 .vscode/
 .claude/
 
-# Transient run outputs (curated copies live in example_runs/)
-report/
-report_seed_*/
+# Benchmark reports under report/ are tracked deliberately: they are the
+# recorded evidence for each evaluation round.

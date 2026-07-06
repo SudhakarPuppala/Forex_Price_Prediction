@@ -7,19 +7,17 @@ other baselines, runs regime-segmented evaluation, and writes both a
 machine-readable JSON report and a human-readable HTML/PNG report
 (including a predicted-vs-actual price chart).
 
-Models compared:
-    - Hybrid CNN-LSTM-Transformer (+ internally-fused XGBoost branch) -- the proposed model
-    - Vanilla LSTM, Simplified TFT       (dissertation Section 1.3)
-    - XGBoost (standalone)               (Paper 1's best-performing model, shown for reference --
-                                           how much does fusing it into Hybrid add over using it alone?)
+Models compared (dissertation Section 1.3):
+    - Hybrid CNN-LSTM-Transformer -- the proposed model, with XGBoost fused
+      INSIDE the architecture as an internal expert (models/hybrid_model.py)
+    - Vanilla LSTM, Simplified TFT
     - ARIMA, Random Walk with Drift      (classical benchmarks; RWD per Paper 1 Sec III.D)
 
-Note: the previous "Ensemble_Hybrid_XGBoost" post-hoc-averaging baseline
-has been removed. XGBoost is no longer blended in after training --
-it's fit first, then its prediction becomes a genuine input to the Hybrid
-model's forward pass, fused via a learned gate (models/hybrid_model.py's
-xgb_trust_gate). Averaging the two externally on top of that would be
-double-counting the same signal.
+Note: XGBoost does not appear as a standalone baseline -- it is an
+integrated component of the Hybrid model (fit first, then its prediction
+becomes a genuine input to the Hybrid's forward pass, blended via the
+learned per-horizon xgb_trust_gate), so evaluating it separately would be
+comparing the model against one of its own parts.
 
 Usage:
     python main.py --pair XAU/USD --epochs 25                  # signal-linked synthetic data (default)
@@ -47,7 +45,7 @@ from data.dataset import build_fx_panel, time_split
 from models.hybrid_model import HybridCNNLSTMTransformer
 from baselines.vanilla_lstm import VanillaLSTM
 from baselines.tft_baseline import SimplifiedTFT
-from baselines.xgboost_baseline import XGBoostForexModel, XGBAugmentedDataset, build_xgb_feature_matrix
+from baselines.xgboost_baseline import XGBoostForexModel, XGBAugmentedDataset
 from baselines.random_walk_baseline import evaluate_random_walk, adf_test
 from training.train import train_model
 from training.evaluate import evaluate_deep_model, evaluate_arima
@@ -94,25 +92,12 @@ def run(
         price_predictions_by_model["_actual"] = actual
         price_predictions_by_model[name] = predicted
 
-    # --- Fit XGBoost FIRST: its prediction becomes a genuine input to the
-    # Hybrid model below, not a post-hoc blend. ---
-    print("\n=== Fitting XGBoost (Paper 1: Dave et al. 2025) -- fused into the Hybrid architecture below ===")
+    # --- Fit XGBoost FIRST: it is an INTERNAL component of the Hybrid
+    # architecture (a fused expert, see models/hybrid_model.py), not a
+    # compared baseline, so it gets no standalone entry in the report. ---
+    print("\n=== Fitting XGBoost expert (fused inside the Hybrid architecture) ===")
     xgb = XGBoostForexModel()
     xgb.fit(train_ds, val_ds)
-
-    # Standalone XGBoost evaluation, kept as a reference baseline: how much
-    # does fusing it into Hybrid add over using it alone?
-    xgb_pred_test = xgb.predict(test_ds)
-    xgb_true_test = np.array([test_ds[i][1].numpy() for i in range(len(test_ds))])
-    xgb_regime_ctx_test = np.array([test_ds[i][2].numpy() for i in range(len(test_ds))])
-    xgb_regime_labels_test = label_regimes(xgb_regime_ctx_test[:, 0])
-    reports["XGBoost_standalone"] = {
-        "model": "XGBoost_standalone",
-        "overall": summarize(xgb_true_test, xgb_pred_test),
-        "per_horizon": per_horizon_metrics(xgb_true_test, xgb_pred_test),
-        "regime_segmented": regime_segmented_metrics(xgb_true_test, xgb_pred_test, xgb_regime_labels_test),
-    }
-    record_price_predictions("XGBoost_standalone", xgb_true_test, xgb_pred_test)
 
     # Wrap datasets so every sample also carries XGBoost's (precomputed,
     # frozen) prediction, for the Hybrid model to fuse internally.
