@@ -80,7 +80,12 @@ class TrainConfig:
     grad_clip: float = 1.0
     early_stopping_patience: int = 8
     seed: int = 42
-    directional_loss_weight: float = 0.15  # combined loss = MSE + weight * soft-sign-disagreement
+    # combined loss = MSE + weight * soft-sign-disagreement. Raised from
+    # 0.15 after the residual-fusion round: with the XGBoost anchor
+    # supplying a strong MSE-optimal baseline, the deep correction's job
+    # is specifically to fix SIGN errors, so the sign term needs enough
+    # weight to shape the correction (0.15 left it collapsing to zero).
+    directional_loss_weight: float = 0.35
     # The auxiliary direction-classification BCE loss (see training/train.py:total_loss)
     # was tested at weight 0.4-0.5 and found to make things WORSE on a ~990-window
     # training set: it overfits faster than the regression task and drags the whole

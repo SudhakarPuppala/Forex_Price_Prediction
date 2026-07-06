@@ -137,10 +137,22 @@ def train_model(
             classification_weight=classification_weight,
         )
 
+    # Checkpoint selection: validation DIRECTIONAL ACCURACY first, val loss
+    # as tiebreak. Selecting on val MSE alone made the Hybrid's residual
+    # XGBoost fusion collapse to exactly XGBoost (correction -> 0, trust
+    # -> 1, test DirAcc within 0.001 of the standalone trees): the epochs
+    # where the deep pathway improves SIGN agreement rarely coincide with
+    # the epochs of minimum squared error, because the directional signal
+    # (mood/sentiment) barely moves the MSE needle on noisy FX returns.
+    # DirectionalAccuracy is also the headline evaluation metric, so the
+    # checkpoint criterion and the reported metric now agree. Applied
+    # identically to every deep model (Hybrid AND baselines) -- this is a
+    # training-procedure change, not a thumb on the comparison scale.
+    best_dir_acc = -1.0
     best_val = float("inf")
     best_state = copy.deepcopy(model.state_dict())
     patience_counter = 0
-    history = {"train_loss": [], "val_loss": []}
+    history = {"train_loss": [], "val_loss": [], "val_dir_acc": []}
 
     for epoch in range(1, epochs + 1):
         t0 = time.time()
@@ -161,6 +173,7 @@ def train_model(
 
         model.eval()
         val_losses = []
+        sign_hits, sign_total = 0, 0
         with torch.no_grad():
             for batch in val_loader:
                 x, y, regime_ctx, xgb_pred = _unpack_batch(batch)
@@ -169,25 +182,33 @@ def train_model(
                     xgb_pred = xgb_pred.to(device)
                 pred, direction_logits = _forward(model, x, regime_ctx, xgb_pred)
                 val_losses.append(loss_fn(pred, direction_logits, y).item())
+                sign_hits += (torch.sign(pred) == torch.sign(y)).sum().item()
+                sign_total += y.numel()
 
         train_loss = float(np.mean(train_losses))
         val_loss = float(np.mean(val_losses)) if val_losses else train_loss
+        val_dir_acc = sign_hits / sign_total if sign_total else 0.0
         scheduler.step(val_loss)
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
+        history["val_dir_acc"].append(val_dir_acc)
 
         if verbose:
-            print(f"epoch {epoch:02d}/{epochs} | train_loss={train_loss:.6f} | val_loss={val_loss:.6f} | {time.time()-t0:.1f}s")
+            print(f"epoch {epoch:02d}/{epochs} | train_loss={train_loss:.6f} | val_loss={val_loss:.6f} | val_dir_acc={val_dir_acc:.4f} | {time.time()-t0:.1f}s")
 
-        if val_loss < best_val - 1e-7:
-            best_val = val_loss
+        improved = (val_dir_acc > best_dir_acc + 1e-6) or (
+            abs(val_dir_acc - best_dir_acc) <= 1e-6 and val_loss < best_val - 1e-7
+        )
+        if improved:
+            best_dir_acc = val_dir_acc
+            best_val = min(best_val, val_loss)
             best_state = copy.deepcopy(model.state_dict())
             patience_counter = 0
         else:
             patience_counter += 1
             if patience_counter >= TRAIN_CFG.early_stopping_patience:
                 if verbose:
-                    print(f"Early stopping at epoch {epoch} (best val_loss={best_val:.6f})")
+                    print(f"Early stopping at epoch {epoch} (best val_dir_acc={best_dir_acc:.4f})")
                 break
 
     model.load_state_dict(best_state)
