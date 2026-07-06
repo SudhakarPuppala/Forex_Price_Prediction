@@ -86,6 +86,13 @@ class TrainConfig:
     # is specifically to fix SIGN errors, so the sign term needs enough
     # weight to shape the correction (0.15 left it collapsing to zero).
     directional_loss_weight: float = 0.35
+    # Deep-supervision weight: the Hybrid model's deep expert (the
+    # CNN-LSTM-Transformer pathway's own forecast, before blending with
+    # XGBoost) gets its own copy of the regression loss so it is trained
+    # as a complete forecaster and cannot collapse to zero -- the failure
+    # mode of the residual-fusion iteration, where the blended output's
+    # loss alone was minimised by ignoring the deep pathway entirely.
+    deep_supervision_weight: float = 0.5
     # The auxiliary direction-classification BCE loss (see training/train.py:total_loss)
     # was tested at weight 0.4-0.5 and found to make things WORSE on a ~990-window
     # training set: it overfits faster than the regression task and drags the whole

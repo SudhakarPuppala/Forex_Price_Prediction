@@ -536,12 +536,14 @@ def test_hybrid_xgb_fusion():
 
 
 def test_hybrid_residual_anchor_and_signal_conditioning():
-    """Boosting-style fusion: at initialisation the decoder heads are
-    zero-initialised and the trust gate is input-independent, so the fresh
-    model's forecast must be exactly xgb_trust * xgb_pred (i.e. training
-    starts anchored at XGBoost, not at random noise). Separately, changing
-    the current buy/sell/hold/none signal columns must change the forecast
-    (the signal-conditioning path is genuinely wired in).
+    """Two-expert convex blend: at initialisation the deep expert's decoder
+    heads are zero-initialised and the blend gate is neutral (sigmoid(0) =
+    0.5), so the fresh model's forecast must be exactly 0.5 * xgb_pred --
+    a clean, deterministic starting point rather than XGBoost plus random
+    noise. The deep expert must also be exposed separately (for the
+    deep-supervision loss). Separately, changing the current
+    buy/sell/hold/none signal columns must change the forecast (the
+    signal-conditioning path is genuinely wired in).
     """
     torch.manual_seed(0)
     m = HybridCNNLSTMTransformer()
@@ -552,11 +554,13 @@ def test_hybrid_residual_anchor_and_signal_conditioning():
 
     with torch.no_grad():
         out = m(x, regime_ctx, xgb_pred)
-    expected = out["xgb_trust"] * xgb_pred
+    assert torch.allclose(out["deep_forecast"], torch.zeros(4, DATA_CFG.horizon), atol=1e-6), \
+        "fresh deep expert must start at zero: zero-init of decoder heads broken?"
+    assert torch.allclose(out["xgb_trust"], torch.full((4, 1), 0.5)), \
+        "fresh blend gate should be the neutral constant sigmoid(0) = 0.5"
+    expected = out["xgb_trust"] * xgb_pred + (1 - out["xgb_trust"]) * out["deep_forecast"]
     assert torch.allclose(out["forecast"], expected, atol=1e-6), \
-        "fresh model must start as (trust * XGBoost): zero-init of decoder heads broken?"
-    assert torch.allclose(out["xgb_trust"], torch.sigmoid(torch.tensor(1.5)) * torch.ones(4, 1)), \
-        "fresh trust gate should be the constant sigmoid(bias)"
+        "forecast must be the convex blend of the two experts"
 
     # Flip the last-bar trading signal (last n_signal_classes columns) and
     # check the forecast responds -- train() mode is not needed because the

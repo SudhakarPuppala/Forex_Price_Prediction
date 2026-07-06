@@ -17,30 +17,38 @@ Plus three additions found necessary during evaluation:
    themselves had no way to adapt their processing to the current
    volatility regime.
 
-3. A boosting-style residual XGBoost fusion (reworked this round). The
-   previous round fused XGBoost's prediction only as a context EMBEDDING
-   the decoder had to decode back into a forecast; that formulation
-   overfit immediately (the information-dense XGBoost input let the
-   network memorise the training set), and the heavy regularisation
-   needed to stop that then blunted the signal -- the fused Hybrid scored
-   BELOW both standalone XGBoost and the previous non-fused Hybrid.
+3. A two-expert convex blend with deep supervision (the XGBoost fusion,
+   third iteration). History of this branch, kept because each failure
+   mode shaped the current design:
 
-   The reworked fusion follows the gradient-boosting recipe instead:
+     * Iteration 1 fused XGBoost's prediction only as a context EMBEDDING
+       -- overfit immediately, and the regularisation needed to stop that
+       blunted the signal (Hybrid scored BELOW standalone XGBoost).
+     * Iteration 2 used a boosting-style additive residual
+       (forecast = trust * xgb_pred + zero-initialised deep correction).
+       The anchor held -- the Hybrid stopped losing to XGBoost -- but it
+       also swallowed the model: any correction that grew was punished by
+       the MSE term before its sign benefits registered, so the trust
+       gate saturated at ~1.0, the correction collapsed to ~0, and the
+       Hybrid converged to a statistical tie with XGBoost (0.586 vs
+       0.587 mean DirAcc over 3 seeds), while earlier rounds had shown
+       the deep pathway ALONE reaching 0.636.
 
-       forecast = xgb_trust * xgb_pred + deep_correction
+   Current design: the deep pathway is trained as a COMPLETE forecaster
+   in its own right (an auxiliary deep-supervision loss on its output --
+   see training/train.py:total_loss), and the final forecast is a
+   learned, per-sample convex blend between the two experts:
 
-   where `xgb_pred` is the frozen tree ensemble's raw k-step forecast
-   (see baselines/xgboost_baseline.py), `xgb_trust` is a learned,
-   per-sample sigmoid gate initialised near 1, and `deep_correction` is
-   the regime-aware decoder's output with its final layers ZERO-initialised.
-   Training therefore *starts* at (approximately) XGBoost's own accuracy
-   -- the strongest baseline -- and gradient descent learns only the
-   residual the trees get wrong. If the deep pathway has nothing to add,
-   the model converges to XGBoost rather than below it; if it does (and
-   the previous non-fused round showed it does), the correction is purely
-   additive. XGBoost's prediction is still also embedded into the context
-   vector, so the decoder and the trust gate can CONDITION on what the
-   trees predicted, not just add to it.
+       forecast = xgb_trust * xgb_pred + (1 - xgb_trust) * deep_forecast
+
+   with `xgb_trust` = sigmoid(gate) initialised neutral (bias 0 -> 0.5).
+   The gate is an arbiter between two competent experts rather than an
+   anchor one of them must fight: deep supervision means the deep branch
+   cannot collapse (its own loss term keeps it a full forecaster), and
+   convexity means the blend's error is bounded by the experts' errors
+   rather than compounding them. XGBoost's prediction is still also
+   embedded into the context vector, so the decoder and the gate can
+   CONDITION on what the trees predicted.
 
 4. A sentiment trading-signal conditioning path (this round): the discrete
    buy/sell/hold/none signal derived from the news feed
@@ -147,18 +155,18 @@ class HybridCNNLSTMTransformer(nn.Module):
         )
         pre_gate_dim = MODEL_CFG.transformer_d_model + MODEL_CFG.skip_embed_dim + MODEL_CFG.xgb_embed_dim
         self.xgb_trust_gate = nn.Linear(pre_gate_dim, 1)
-        # Start the trust gate high (sigmoid(1.5) ~= 0.82) and input-independent,
-        # so epoch 0 forecasts track XGBoost's; the weights learn per-sample
-        # deviations from that anchor as training progresses.
+        # Start the blend gate NEUTRAL (sigmoid(0) = 0.5) and
+        # input-independent: neither expert is privileged at epoch 0, and
+        # the weights learn per-sample arbitration as training progresses.
         nn.init.zeros_(self.xgb_trust_gate.weight)
-        nn.init.constant_(self.xgb_trust_gate.bias, 1.5)
+        nn.init.zeros_(self.xgb_trust_gate.bias)
 
         context_dim = MODEL_CFG.transformer_d_model + MODEL_CFG.skip_embed_dim + MODEL_CFG.xgb_embed_dim
         self.regime_output = RegimeAwareOutputLayer(context_dim=context_dim)
-        # Zero-init the decoder heads' final layers: the deep pathway begins
-        # as a zero correction on top of the XGBoost anchor and earns its
-        # contribution through the loss, instead of starting as random noise
-        # added to an already-good forecast.
+        # Zero-init the decoder heads' final layers: the deep expert starts
+        # as a zero forecast (so epoch-0 output is 0.5 * XGBoost, not
+        # XGBoost plus random noise) and grows under its own deep-supervision
+        # loss term from the first optimizer step.
         for head in (self.regime_output.stable_head, self.regime_output.high_vol_head):
             final_linear = head.net[-1]
             nn.init.zeros_(final_linear.weight)
@@ -234,13 +242,17 @@ class HybridCNNLSTMTransformer(nn.Module):
         xgb_embed = xgb_embed_raw * xgb_trust  # learned, per-sample scaling of the XGBoost signal
 
         context = torch.cat([deep_context, skip, xgb_embed], dim=-1)  # (B, 256+32+32=320)
-        deep_correction, gate, band = self.regime_output(context, regime_ctx)
-        # Boosting-style residual: start from the (trusted fraction of the)
-        # XGBoost forecast, add the deep pathway's learned correction.
-        forecast = xgb_trust * xgb_pred + deep_correction
+        deep_forecast, gate, band = self.regime_output(context, regime_ctx)
+        # Two-expert convex blend: the learned per-sample gate arbitrates
+        # between the frozen tree ensemble and the deep forecaster. The
+        # deep expert is additionally trained under its own loss term
+        # (deep supervision, training/train.py), so it cannot collapse to
+        # zero the way the residual-correction formulation did.
+        forecast = xgb_trust * xgb_pred + (1.0 - xgb_trust) * deep_forecast
         direction_logits = self.direction_head(context)  # (B, k), raw logits for P(return > 0)
         return {
             "forecast": forecast,
+            "deep_forecast": deep_forecast,  # deep expert alone, for the deep-supervision loss
             "gate": gate,
             "xgb_trust": xgb_trust,
             "band": band,

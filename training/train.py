@@ -85,9 +85,11 @@ def _forward(model, x, regime_ctx, xgb_pred=None):
     """All models (hybrid + both baselines) return
     {"forecast": (B,k), "direction_logits": (B,k)}. Baselines simply ignore
     xgb_pred (accepted for uniform calling convention); only the Hybrid
-    model actually fuses it (see models/hybrid_model.py)."""
+    model actually fuses it, and only the Hybrid returns "deep_forecast"
+    (its deep expert's standalone output, used for the deep-supervision
+    loss term -- see models/hybrid_model.py)."""
     out = model(x, regime_ctx, xgb_pred)
-    return out["forecast"], out.get("direction_logits")
+    return out["forecast"], out.get("direction_logits"), out.get("deep_forecast")
 
 
 def _unpack_batch(batch):
@@ -130,12 +132,22 @@ def train_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=TRAIN_CFG.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
 
-    def loss_fn(pred, direction_logits, target):
-        return total_loss(
+    def loss_fn(pred, direction_logits, target, deep_forecast=None):
+        loss = total_loss(
             pred, target, direction_logits,
             directional_weight=directional_weight,
             classification_weight=classification_weight,
         )
+        if deep_forecast is not None and TRAIN_CFG.deep_supervision_weight > 0:
+            # Deep supervision: the deep expert is held to the same
+            # regression objective as the blended output, so it stays a
+            # complete forecaster instead of hiding behind XGBoost.
+            loss = loss + TRAIN_CFG.deep_supervision_weight * total_loss(
+                deep_forecast, target, None,
+                directional_weight=directional_weight,
+                classification_weight=0.0,
+            )
+        return loss
 
     # Checkpoint selection: validation DIRECTIONAL ACCURACY first, val loss
     # as tiebreak. Selecting on val MSE alone made the Hybrid's residual
@@ -164,8 +176,8 @@ def train_model(
             if xgb_pred is not None:
                 xgb_pred = xgb_pred.to(device)
             optimizer.zero_grad()
-            pred, direction_logits = _forward(model, x, regime_ctx, xgb_pred)
-            loss = loss_fn(pred, direction_logits, y)
+            pred, direction_logits, deep_forecast = _forward(model, x, regime_ctx, xgb_pred)
+            loss = loss_fn(pred, direction_logits, y, deep_forecast)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), TRAIN_CFG.grad_clip)
             optimizer.step()
@@ -180,8 +192,8 @@ def train_model(
                 x, y, regime_ctx = x.to(device), y.to(device), regime_ctx.to(device)
                 if xgb_pred is not None:
                     xgb_pred = xgb_pred.to(device)
-                pred, direction_logits = _forward(model, x, regime_ctx, xgb_pred)
-                val_losses.append(loss_fn(pred, direction_logits, y).item())
+                pred, direction_logits, deep_forecast = _forward(model, x, regime_ctx, xgb_pred)
+                val_losses.append(loss_fn(pred, direction_logits, y, deep_forecast).item())
                 sign_hits += (torch.sign(pred) == torch.sign(y)).sum().item()
                 sign_total += y.numel()
 
