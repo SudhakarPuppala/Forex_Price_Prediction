@@ -541,18 +541,22 @@ def try_fetch_real_panel(ticker_symbol: str = "GC=F", interval: str = "5m", coun
     if ohlc.empty:
         return None
 
-    # Interval-aware news depth: intraday runs cover 60 days (matching the
-    # price history cap), daily runs reach ~3 years back via monthly GDELT
-    # slices (the DOC API archive starts in 2017; bars older than the news
-    # coverage simply carry the 'none' signal -- "no news known").
-    intraday = interval.endswith(("m", "h"))
-    news = fetch_all_news(
-        gdelt_days=60 if intraday else 1095,
-        gdelt_window_days=5 if intraday else 30,
-    )
-    news_aligned = align_news_to_bars(
-        ohlc.index, news, window_hours=6.0 if intraday else 24.0
-    )
+    # Interval-aware news depth, matched to each interval's PRICE history:
+    # minute bars have 60 days of prices (5-day GDELT slices), hourly bars
+    # have 730 days (monthly slices), daily bars get ~3 years -- the DOC
+    # API archive starts in 2017, and bars older than the news coverage
+    # simply carry the 'none' signal ("no news known").
+    if interval.endswith("m"):
+        gdelt_days, gdelt_window = 60, 5
+        align_hours = 6.0
+    elif interval.endswith("h"):
+        gdelt_days, gdelt_window = 730, 30
+        align_hours = 6.0
+    else:
+        gdelt_days, gdelt_window = 1095, 30
+        align_hours = 24.0
+    news = fetch_all_news(gdelt_days=gdelt_days, gdelt_window_days=gdelt_window)
+    news_aligned = align_news_to_bars(ohlc.index, news, window_hours=align_hours)
 
     # Real macro stream (Yahoo rates/DXY + BLS CPI); None -> synthetic fallback.
     macro = fetch_real_macro(ohlc.index)

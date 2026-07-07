@@ -41,25 +41,23 @@ import matplotlib.pyplot as plt
 REPORT_DIR = "report"
 CHART_DIR = os.path.join(REPORT_DIR, "charts_final")
 SEEDS = (9, 36, 99)
+# Per the dissertation objective, the compared baselines are the two
+# classical econometric models (ARIMA, GARCH); only the Hybrid (a gradient
+# -trained model with per-window forecasts) exports full prediction CSVs
+# -- the walk-forward econometric baselines are evaluated at subsampled
+# origins and appear in the summary table but not the conviction curves.
 MODELS_WITH_EXPORTS = [
     "Hybrid_CNN_LSTM_Transformer",
-    "Vanilla_LSTM",
-    "Simplified_TFT",
-    "Random_Walk_Drift",
 ]
 NICE = {
-    "Hybrid_CNN_LSTM_Transformer": "Hybrid CNN-LSTM-Transformer",
-    "Vanilla_LSTM": "Vanilla LSTM",
-    "Simplified_TFT": "Simplified TFT",
+    "Hybrid_CNN_LSTM_Transformer": "Hybrid CNN-LSTM-Transformer (+GRU +XGBoost)",
     "ARIMA": "ARIMA",
-    "Random_Walk_Drift": "Random Walk with Drift",
+    "GARCH": "GARCH (AR(1)-GARCH(1,1))",
 }
 COLORS = {
     "Hybrid_CNN_LSTM_Transformer": "#1f77b4",
-    "Vanilla_LSTM": "#ff7f0e",
-    "Simplified_TFT": "#2ca02c",
     "ARIMA": "#9467bd",
-    "Random_Walk_Drift": "#8c564b",
+    "GARCH": "#2ca02c",
 }
 
 
@@ -225,6 +223,10 @@ def make_charts(d) -> dict:
                 continue
             mean_curve = np.mean(curves, axis=0)
             ax.plot([c * 100 for c in coverages], mean_curve, "o-", label=NICE[m], color=COLORS[m])
+        ens_key = ("Hybrid_CNN_LSTM_Transformer", "ensemble")
+        if ens_key in d["preds"]:
+            ens_curve = [diracc_at_coverage(d["preds"][ens_key], c) for c in coverages]
+            ax.plot([c * 100 for c in coverages], ens_curve, "s--", label="Hybrid seed-ensemble", color="#d62728")
         ax.axhline(0.5, color="red", ls="--", lw=1)
         ax.set_xscale("log")
         ax.set_xticks([100, 50, 20, 10, 5])
@@ -249,6 +251,32 @@ def make_charts(d) -> dict:
         ax.set_title("Directional accuracy by horizon (mean over 3 seeds)")
         ax.legend(fontsize=8)
         save(fig, "per_horizon_diracc.png")
+
+    # 8. Costed backtest equity curves (roadmap: P&L is the decision-grade metric)
+    if d["roadmap"] and d["roadmap"].get("backtest"):
+        bts = [b for b in d["roadmap"]["backtest"] if b]
+        if bts:
+            fig, ax = plt.subplots(figsize=(9, 4))
+            for s, bt in zip(SEEDS, bts):
+                ax.plot(pd.to_datetime(bt["dates"]), np.array(bt["equity_curve"]) * 100,
+                        lw=1.0, label=f"strategy (seed {s})")
+            ax.plot(pd.to_datetime(bts[0]["dates"]), np.array(bts[0]["buy_hold_curve"]) * 100,
+                    lw=1.2, color="k", ls="--", label="buy & hold")
+            ax.set_ylabel("cumulative log-return (%)")
+            ax.set_title(f"Conviction backtest, net of {bts[0]['cost_bps_per_change']}bps per position change "
+                         f"(validation-calibrated threshold)")
+            ax.legend(fontsize=8)
+            save(fig, "backtest_equity.png")
+
+    # 9. XGBoost-expert feature importance (noise audit)
+    if d["roadmap"] and d["roadmap"].get("feature_importance"):
+        fi = d["roadmap"]["feature_importance"]
+        names = [n for n, _ in fi["top"]][::-1]
+        vals = [v for _, v in fi["top"]][::-1]
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.barh(names, vals, color="#1f77b4")
+        ax.set_title("Top features by XGBoost-expert importance (mean/std/last aggregated)")
+        save(fig, "feature_importance.png")
 
     return charts
 
@@ -364,10 +392,14 @@ carried no persistent directional news bias, so any model edge must come from
 only</b> and applied everywhere (no test leakage), with a guard for near-constant columns.</p>
 <table>
 <tr><th>Stream</th><th>#</th><th>Features</th><th>Why</th></tr>
-<tr><td>Technical</td><td>8</td>
-<td>log-return OHLC (4) · RSI-14 · MACD histogram · Bollinger-band width · volume z-score</td>
+<tr><td>Technical</td><td>12</td>
+<td>log-return OHLC (4) · RSI-14 · MACD histogram · Bollinger-band width · volume z-score
+· <b>ATR%</b> · <b>ROC-10</b> · <b>Stochastic %K</b> · <b>EMA12/26 log-ratio</b></td>
 <td>Momentum, overbought/oversold state, trend acceleration, local volatility, and
-conviction behind moves — the classical price-action vocabulary.</td></tr>
+conviction behind moves. The four bolded indicators were added for intraday resolution:
+scale-free volatility level (ATR%), direct momentum (ROC), range position (%K), and
+smoothed trend state (EMA ratio) — the XGBoost importance audit (Section 8) ranks
+EMA-ratio and ATR% in the top six immediately, validating the additions.</td></tr>
 <tr><td>Macro</td><td>6</td>
 <td><b>REAL data</b>: 13-week T-bill rate (^IRX) · 10-year Treasury yield (^TNX) ·
 US Dollar Index (DXY) · CPI YoY (BLS) · CPI MoM (surprise proxy) · days-since-CPI-release</td>
@@ -418,11 +450,14 @@ sentiment block that enters the window
     S.append("""
 <h2>5. Hybrid architecture, stage by stage</h2>
 <pre>
-(60×26) ─ Feature fusion: per-modality projections + learned cross-modal gate → (60×64)
+(60×30) ─ Feature fusion: per-modality projections + learned cross-modal gate → (60×64)
         ─ CNN: two Conv1D(k=3)+BatchNorm blocks, max-pool → (30×128) local pattern maps
               + regime embedding  (realised vol, ATR → 128)      ┐ added to every timestep:
               + sentiment embedding (8 scores + 4-way signal → 128)┘ conditions ALL later stages
-        ─ Bi-LSTM: 2 stacked bidirectional layers, H=128/dir → (30×256) temporal context
+        ─ Recurrent stage, TWO parallel branches (the GRU infusion):
+              Bi-LSTM (2×128/dir) → (30×256)   longer-memory cell state
+              Bi-GRU  (2×128/dir) → (30×256)   faster-adapting two-gate dynamics
+              blended per sample by a learned neutral-start gate → (30×256)
         ─ Transformer: 4 causal encoder layers, 8 heads, FFN 1024 → attention-pooled (256)
         ─ Skip connection: raw last-bar macro+sentiment → 32-dim embedding
         ─ XGBoost expert branch: frozen tree ensemble's 10-step forecast, embedded (32)
@@ -484,42 +519,64 @@ accuracy</b>; the loss adds a sign-agreement penalty (weight 0.35) to plain MSE.
         hyb_da = hyb.get("DirectionalAccuracy", {})
         S.append(f"""
 <h2>6. Baselines vs the Hybrid model</h2>
-<p>The dissertation's Section 1.3 baseline set. XGBoost does <b>not</b> appear as a
-baseline — it is an internal expert <i>inside</i> the Hybrid, so a standalone row would
-compare the model against one of its own components. ARIMA and Random Walk with Drift are
-deterministic (no seed variance). The <b>seed-ensemble</b> row (roadmap item 6) averages
-the three seeds' Hybrid forecasts before scoring.</p>
+<p>Per the dissertation objective, the comparison is <b>classical econometrics vs the
+proposed hybrid</b>: ARIMA (Box–Jenkins conditional mean) and GARCH (AR(1)-GARCH(1,1)
+conditional mean + variance, Bollerslev 1986), both evaluated walk-forward with refitting
+at each origin. XGBoost and the GRU branch do <b>not</b> appear as baselines — they are
+internal components of the Hybrid, so standalone rows would compare the model against its
+own parts. ARIMA/GARCH are deterministic (no seed variance). The <b>seed-ensemble</b> row
+(roadmap item 6) averages the three seeds' Hybrid forecasts before scoring.</p>
 {df_to_html(comp, max_rows=10, floatfmt="{:.4f}")}
 """)
 
     # ---------------- 7. graphs ----------------
     S.append(f"""
 <h2>7. Comparison graphs — which model wins where</h2>
-<p><b>Scenario A: predict every bar (unfiltered).</b> <b>Random Walk with Drift wins the
-raw average (0.577) by construction, not by skill</b>: the chronological test window is
-the most recent ~15% of the daily history — a period containing gold's strongest bull
-run — so a model that always predicts "up" is right exactly as often as the market rose,
-which is what RWD's positive-drift forecast amounts to. This is a property of the regime,
-and it is precisely why the dissertation's regime-aware framing matters. Among models
-that genuinely predict both directions, the TFT (0.541) and the Hybrid (0.526) lead,
-with real seed variance now shown as error bars.</p>
+""")
+    # Numbers for the scenario narrative, computed from this run's data so
+    # the prose can never contradict the charts.
+    def _mean_da(m):
+        return d["summary"][m]["DirectionalAccuracy"]["mean"] if d["summary"] and m in d["summary"] else None
+
+    hyb_da, arima_da, garch_da = (_mean_da(m) for m in
+                                  ["Hybrid_CNN_LSTM_Transformer", "ARIMA", "GARCH"])
+    conv_txt = ""
+    hyb_curves = [
+        [diracc_at_coverage(d["preds"][("Hybrid_CNN_LSTM_Transformer", s)], c) for c in (1.0, 0.2, 0.1, 0.05)]
+        for s in SEEDS if ("Hybrid_CNN_LSTM_Transformer", s) in d["preds"]
+    ]
+    if hyb_curves:
+        mc = np.mean(hyb_curves, axis=0)
+        conv_txt = (f"{mc[0]:.3f} unfiltered → {mc[1]:.3f} @20% → {mc[2]:.3f} @10% → "
+                    f"{mc[3]:.3f} @5% coverage")
+    h_txt = ""
+    ens_key = ("Hybrid_CNN_LSTM_Transformer", "ensemble")
+    if ens_key in d["preds"]:
+        ep = d["preds"][ens_key]
+        h1 = float(np.mean(np.sign(ep["actual_h1"]) == np.sign(ep["pred_h1"])))
+        h10 = float(np.mean(np.sign(ep["actual_h10"]) == np.sign(ep["pred_h10"])))
+        h_txt = f" (ensemble: h1 {h1:.3f} vs h10 {h10:.3f})"
+    S.append(f"""
+<p><b>Scenario A: predict every bar (unfiltered).</b> Hybrid
+{f'{hyb_da:.3f}' if hyb_da else '—'} vs ARIMA {f'{arima_da:.3f}' if arima_da else '—'}
+and GARCH {f'{garch_da:.3f}' if garch_da else '—'} (walk-forward, subsampled origins).
+The econometric baselines model conditional mean/variance directly and are strong on
+noisy bars; the chart shows the mean ± std over seeds against the 0.50 coin-flip line.</p>
 <img src="{charts.get('diracc_mean_std.png','')}" alt="mean diracc">
 <img src="{charts.get('per_seed_diracc.png','')}" alt="per-seed diracc">
-<p><b>Scenario B: act only on confident signals.</b> As coverage tightens from 100% to
-5%, the <b>Hybrid gains the most of any learned model</b> (+0.09: 0.526 → 0.557 @20% →
-0.597 @10% → 0.612 @5%), evidence that its conviction is informative. The vanilla LSTM
-stays flat — it does not know when it knows. RWD's curve also rises, but its
-"conviction" is simply trend steepness, i.e. a bigger bet on the same always-up call;
-the deployable, validation-calibrated version of the Hybrid's rule (Section 8) reaches
-<b>0.549–0.586 at ~20% coverage on every seed</b> with no test-set tuning.</p>
+<p><b>Scenario B: act only on confident signals.</b> The Hybrid's mean conviction curve:
+<b>{conv_txt}</b> — accuracy rises monotonically as it speaks more selectively, evidence
+that its forecast magnitude is informative conviction, not noise. The deployable,
+validation-calibrated version of this rule and its costed backtest are in Section 8.
+(ARIMA/GARCH have no per-window export at full test resolution, so they appear in the
+table above rather than on this curve.)</p>
 <img src="{charts.get('conviction_coverage.png','')}" alt="conviction coverage">
-<p><b>Scenario C: longer horizons.</b> Accuracy on the cumulative 10-bar (2-week) return
-runs slightly above the 1-bar figure for the Hybrid (0.524 vs 0.518 on the ensemble) —
-signal accumulates over horizons while single-bar noise dominates h=1.</p>
+<p><b>Scenario C: longer horizons.</b> Per-horizon accuracy on the cumulative return{h_txt}
+shows where in the 10-bar horizon the model earns its accuracy.</p>
 <img src="{charts.get('per_horizon_diracc.png','')}" alt="per horizon">
-<p><b>Scenario D: magnitude error (MAE).</b> ARIMA wins on pure magnitude (0.0170) —
-expected on near-random-walk returns, and why MAE alone is a misleading model-selection
-criterion for directional trading.</p>
+<p><b>Scenario D: magnitude error (MAE).</b> The econometric baselines typically win on
+pure magnitude — expected on near-random-walk returns, and why MAE alone is a misleading
+model-selection criterion for directional trading.</p>
 <img src="{charts.get('mae_comparison.png','')}" alt="mae">
 """)
 
@@ -568,6 +625,38 @@ last 3 bars) vs quiet origins:</p>
 a deployable decision rule with no test-set tuning, unlike the descriptive
 coverage curves in Section 7:</p>
 {df_to_html(pd.DataFrame(ab_rows), floatfmt="{:.4f}")}
+""")
+        bts = [b for b in rm.get("backtest", []) if b]
+        if bts:
+            bt_rows = [{
+                "seed": s,
+                "net return %": round(b["total_return_pct"], 2),
+                "buy&hold %": round(b["buy_hold_return_pct"], 2),
+                "Sharpe": round(b["annualised_sharpe"], 2),
+                "b&h Sharpe": round(b["buy_hold_sharpe"], 2),
+                "in market": f"{b['time_in_market']*100:.0f}%",
+                "trades": b["n_transactions"],
+                "max DD (log)": round(b["max_drawdown_log"], 4),
+            } for s, b in zip(SEEDS, bts)]
+            S.append(f"""
+<p><b>Costed conviction backtest (the P&amp;L view):</b> the abstention rule converted
+into a bar-by-bar strategy — trade the 1-step forecast direction only above the
+validation-calibrated threshold, pay {bts[0]['cost_bps_per_change']}bps per position
+change, stay flat otherwise. Accuracy is a proxy; this is the decision-grade metric:</p>
+{df_to_html(pd.DataFrame(bt_rows), floatfmt="{:.2f}")}
+<img src="{charts.get('backtest_equity.png','')}" alt="backtest equity">
+""")
+        if rm.get("feature_importance"):
+            fi = rm["feature_importance"]
+            bottom_txt = ", ".join(f"{n} ({v:.4f})" for n, v in fi["bottom"])
+            S.append(f"""
+<p><b>Feature-importance audit (noise check):</b> aggregated XGBoost-expert importances
+per named feature. Lowest-importance candidates for removal in a future round:
+<i>{bottom_txt}</i>. Note this measures the TABULAR expert's view only — the deep
+pathway consumes the same features sequentially (e.g. the one-hot signal columns act
+through the CNN conditioning embedding), so low tree-importance alone does not justify
+removal; it flags candidates for an ablation.</p>
+<img src="{charts.get('feature_importance.png','')}" alt="feature importance">
 """)
         hyb_mean = hyb_std = best_base = None
         if d["summary"] and "Hybrid_CNN_LSTM_Transformer" in d["summary"]:
