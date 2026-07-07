@@ -170,19 +170,23 @@ class HybridCNNLSTMTransformer(nn.Module):
             nn.Dropout(MODEL_CFG.decoder_dropout),
             nn.Linear(MODEL_CFG.regime_hidden, MODEL_CFG.xgb_embed_dim),
         )
-        pre_gate_dim = MODEL_CFG.transformer_d_model + MODEL_CFG.skip_embed_dim + MODEL_CFG.xgb_embed_dim
-        # PER-HORIZON blend gate: one trust value per forecast step, not a
-        # single scalar for the whole 10-step horizon. The two experts have
-        # different horizon profiles -- the deep pathway sees the (fast-
-        # decaying) sentiment/mood signal that matters most at short
-        # horizons, while the tree ensemble's window summaries extrapolate
-        # more stably further out -- and a scalar gate forced one trust
-        # level onto both. (B, k) x (B, k) broadcasting keeps the blend
-        # arithmetic unchanged.
-        self.xgb_trust_gate = nn.Linear(pre_gate_dim, MODEL_CFG.horizon)
+        # REGIME-DRIVEN per-horizon blend gate. Earlier iterations let the
+        # gate read the full context (deep representation + skip + xgb
+        # embedding); the feature audit showed a calibration disconnect --
+        # the tabular XGBoost expert assigns ~zero importance to the
+        # sentiment-dynamics features the deep pathway leans on, so the
+        # two experts specialise in DIFFERENT regimes: the trees in quiet,
+        # technical/macro-driven stretches, the deep pathway around
+        # news/volatility shocks. The gate therefore now consumes the
+        # volatility regime context (realised vol, ATR) directly and
+        # nothing else: it learns "how volatile is this window" -> "which
+        # expert to trust, per horizon", e.g. leaning to the deep pathway
+        # during high-volatility event windows and blending back into
+        # XGBoost during quiet ones.
+        self.xgb_trust_gate = nn.Linear(2, MODEL_CFG.horizon)
         # Start the blend gate NEUTRAL (sigmoid(0) = 0.5) and
         # input-independent: neither expert is privileged at epoch 0, and
-        # the weights learn per-sample arbitration as training progresses.
+        # the weights learn regime-based arbitration as training progresses.
         nn.init.zeros_(self.xgb_trust_gate.weight)
         nn.init.zeros_(self.xgb_trust_gate.bias)
 
@@ -235,6 +239,20 @@ class HybridCNNLSTMTransformer(nn.Module):
             band:             (B, k)   uncertainty band estimate
             direction_logits: (B, k)   auxiliary directional-classification logits
         """
+        if self.training and MODEL_CFG.sentiment_dropout_p > 0:
+            # Modality masking (text dropout): zero the whole sentiment
+            # stream for a random subset of samples, so the CNN/recurrent
+            # stages build representations that survive news-less windows
+            # (most of the pre-2017 archive) instead of over-relying on a
+            # single stream. Zero in train-normalised space = the neutral
+            # "average sentiment state". The mask also propagates to the
+            # sentiment conditioning embedding and the skip connection,
+            # since both read from x.
+            drop = torch.rand(x.size(0), device=x.device) < MODEL_CFG.sentiment_dropout_p
+            if drop.any():
+                x = x.clone()
+                x[drop, :, -DATA_CFG.n_sentiment_features:] = 0.0
+
         fused = self.fusion(x)              # (B, T, 64)
         local = self.cnn(fused)             # (B, T/2, 128)
 
@@ -269,8 +287,9 @@ class HybridCNNLSTMTransformer(nn.Module):
         xgb_normed = self.xgb_input_dropout(self.xgb_input_norm(xgb_pred))
         xgb_embed_raw = self.xgb_embed(xgb_normed)  # (B, xgb_embed_dim)
 
-        gate_input = torch.cat([deep_context, skip, xgb_embed_raw], dim=-1)
-        xgb_trust = torch.sigmoid(self.xgb_trust_gate(gate_input))  # (B, k) per-horizon trust
+        # Regime-driven trust: volatility context decides the expert blend
+        # (quiet -> trees, turbulent -> deep pathway), per horizon.
+        xgb_trust = torch.sigmoid(self.xgb_trust_gate(regime_ctx))  # (B, k)
         # Scale the context embedding by the mean trust across horizons
         # (the embedding is a single vector, not per-horizon).
         xgb_embed = xgb_embed_raw * xgb_trust.mean(dim=-1, keepdim=True)

@@ -42,12 +42,13 @@ REPORT_DIR = "report"
 CHART_DIR = os.path.join(REPORT_DIR, "charts_final")
 SEEDS = (9, 36, 99)
 # Per the dissertation objective, the compared baselines are the two
-# classical econometric models (ARIMA, GARCH); only the Hybrid (a gradient
-# -trained model with per-window forecasts) exports full prediction CSVs
-# -- the walk-forward econometric baselines are evaluated at subsampled
-# origins and appear in the summary table but not the conviction curves.
+# classical econometric models (ARIMA, GARCH). ALL models are evaluated
+# at every test origin (full walk-forward for the baselines) and export
+# per-window prediction CSVs, so all appear on the conviction curves.
 MODELS_WITH_EXPORTS = [
     "Hybrid_CNN_LSTM_Transformer",
+    "ARIMA",
+    "GARCH",
 ]
 NICE = {
     "Hybrid_CNN_LSTM_Transformer": "Hybrid CNN-LSTM-Transformer (+GRU +XGBoost)",
@@ -153,8 +154,9 @@ def make_charts(d) -> dict:
         fig, axes = plt.subplots(2, 2, figsize=(9, 4.5), sharex=True)
         for ax, col, ttl in zip(
             axes.ravel(),
-            ["rate_level", "yield_10y", "dollar_index", "cpi_yoy"],
-            ["13w T-bill rate (^IRX)", "10y Treasury yield (^TNX)", "US Dollar Index (DXY)", "CPI YoY % (BLS)"],
+            ["rate_z21", "yield_chg5", "dollar_ret5", "cpi_yoy"],
+            ["Policy-rate 21d z-score (^IRX)", "10y yield 5d change (^TNX)",
+             "Dollar index 5d log-return (DXY)", "CPI YoY % (BLS)"],
         ):
             if col in m.columns:
                 ax.plot(m[date_col], m[col], lw=0.7)
@@ -401,12 +403,13 @@ scale-free volatility level (ATR%), direct momentum (ROC), range position (%K), 
 smoothed trend state (EMA ratio) — the XGBoost importance audit (Section 8) ranks
 EMA-ratio and ATR% in the top six immediately, validating the additions.</td></tr>
 <tr><td>Macro</td><td>6</td>
-<td><b>REAL data</b>: 13-week T-bill rate (^IRX) · 10-year Treasury yield (^TNX) ·
-US Dollar Index (DXY) · CPI YoY (BLS) · CPI MoM (surprise proxy) · days-since-CPI-release</td>
-<td>Gold's fundamental drivers: opportunity cost of holding a zero-yield asset (rates),
-real-rate proxy (10y), the inverse-correlated dollar, and inflation. Forward-filled onto
-the trading calendar with no look-ahead — roadmap item 3, replacing the synthetic
-placeholder stream. Export: <code>exports/macro_fred.csv</code>.</td></tr>
+<td><b>REAL, STATIONARY data</b>: policy-rate 21-day z-score (^IRX) · 10-year yield
+5-day change (^TNX) · dollar-index 5-day log-return (DXY) · CPI YoY (BLS) · CPI MoM
+(surprise proxy) · days-since-CPI-release (scaled to [0,1])</td>
+<td>Gold's fundamental drivers in scale-free, differenced form: raw levels (a 4% yield
+in 2007 vs 0.1% in 2020) create a train/test distribution shift that blocks transfer
+from the 2000s history to the 2022+ test era; rates-of-change are comparable across
+decades. Forward-filled with no look-ahead. Export: <code>exports/macro_fred.csv</code>.</td></tr>
 <tr><td>Sentiment</td><td>12</td>
 <td>rolling mean/std/min/max of FinBERT score · EWM-decayed score · momentum ·
 volatility · headline-count z · <b>one-hot buy/sell/hold/none signal</b></td>
@@ -521,8 +524,9 @@ accuracy</b>; the loss adds a sign-agreement penalty (weight 0.35) to plain MSE.
 <h2>6. Baselines vs the Hybrid model</h2>
 <p>Per the dissertation objective, the comparison is <b>classical econometrics vs the
 proposed hybrid</b>: ARIMA (Box–Jenkins conditional mean) and GARCH (AR(1)-GARCH(1,1)
-conditional mean + variance, Bollerslev 1986), both evaluated walk-forward with refitting
-at each origin. XGBoost and the GRU branch do <b>not</b> appear as baselines — they are
+conditional mean + variance, Bollerslev 1986), both refit walk-forward at <b>every one of
+the test origins the Hybrid is scored on</b> — the earlier 40-origin subsample biased the
+comparison and has been eliminated. XGBoost and the GRU branch do <b>not</b> appear as baselines — they are
 internal components of the Hybrid, so standalone rows would compare the model against its
 own parts. ARIMA/GARCH are deterministic (no seed variance). The <b>seed-ensemble</b> row
 (roadmap item 6) averages the three seeds' Hybrid forecasts before scoring.</p>
@@ -568,8 +572,8 @@ noisy bars; the chart shows the mean ± std over seeds against the 0.50 coin-fli
 <b>{conv_txt}</b> — accuracy rises monotonically as it speaks more selectively, evidence
 that its forecast magnitude is informative conviction, not noise. The deployable,
 validation-calibrated version of this rule and its costed backtest are in Section 8.
-(ARIMA/GARCH have no per-window export at full test resolution, so they appear in the
-table above rather than on this curve.)</p>
+ARIMA/GARCH now appear on the same curve, computed from their full-resolution
+walk-forward forecasts.</p>
 <img src="{charts.get('conviction_coverage.png','')}" alt="conviction coverage">
 <p><b>Scenario C: longer horizons.</b> Per-horizon accuracy on the cumulative return{h_txt}
 shows where in the 10-bar horizon the model earns its accuracy.</p>
@@ -687,9 +691,7 @@ removal; it flags candidates for an ablation.</p>
             f" volatility-clustered window, while the Hybrid's advantages are concentrated"
             f" in its conviction machinery (selective accuracy, abstention, event analysis)"
             f" and its multi-modal interpretability rather than the unfiltered average."
-            f" Note the sample-size asymmetry: the walk-forward baselines are scored at 40"
-            f" subsampled origins vs the Hybrid's full test set, so their point estimates"
-            f" carry wider error bars than the table suggests."
+            f" All models are scored on identical, full-resolution test origins."
         )
         S.append(f"""
 <h3>Final verdict</h3>

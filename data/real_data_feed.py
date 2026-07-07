@@ -479,11 +479,29 @@ def fetch_real_macro(bar_index: pd.DatetimeIndex, timeout: int = 30) -> Optional
     )
     days_since = np.clip(days_since, 0, 60) / 60.0
 
+    # STATIONARY, scale-free macro inputs. Raw levels (a 4% yield in 2007
+    # vs 0.1% in 2020, DXY at 70 vs 110) create a train/test distribution
+    # shift that blocks transfer from the 2000s history to the 2022+ test
+    # era; differenced/z-scored forms are comparable across decades:
+    #   rate_z21    -- 21-day z-score of the policy-rate proxy (level regime
+    #                  relative to its own recent history)
+    #   yield_chg5  -- 5-day change in the 10y yield (percentage points)
+    #   dollar_ret5 -- 5-day log-return of the dollar index
+    #   cpi_yoy / cpi_mom are already rates of change (stationary)
+    #   days_since_cpi is already scaled continuously to [0, 1]
+    rate = pd.Series(ffill_onto_bars(series["rate_level"]), index=bar_index)
+    yld = pd.Series(ffill_onto_bars(series["yield_10y"]), index=bar_index)
+    dxy = pd.Series(ffill_onto_bars(series["dollar_index"]), index=bar_index)
+
+    rate_z21 = (rate - rate.rolling(21, min_periods=5).mean()) / (rate.rolling(21, min_periods=5).std() + 1e-6)
+    yield_chg5 = yld.diff(5)
+    dollar_ret5 = np.log(dxy / dxy.shift(5))
+
     macro = pd.DataFrame(
         {
-            "rate_level": ffill_onto_bars(series["rate_level"]),
-            "yield_10y": ffill_onto_bars(series["yield_10y"]),
-            "dollar_index": ffill_onto_bars(series["dollar_index"]),
+            "rate_z21": rate_z21,
+            "yield_chg5": yield_chg5,
+            "dollar_ret5": dollar_ret5,
             "cpi_yoy": ffill_onto_bars(cpi_yoy),
             "cpi_mom": ffill_onto_bars(cpi_mom),
             "days_since_cpi": days_since,
@@ -492,7 +510,7 @@ def fetch_real_macro(bar_index: pd.DatetimeIndex, timeout: int = 30) -> Optional
     ).ffill().fillna(0.0)
 
     print(f"[real_data_feed] real macro OK: ^IRX/^TNX/DXY (Yahoo) + CPI (BLS), "
-          f"aligned to {len(macro)} bars.")
+          f"stationary transforms, aligned to {len(macro)} bars.")
     return macro
 
 

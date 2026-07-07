@@ -215,15 +215,26 @@ def run(
     avg_xgb_trust = _average_xgb_trust(hybrid, test_ds_xgb, device=device)
     print(f"[hybrid] learned average XGBoost trust weight on test set: {avg_xgb_trust:.3f} (0=ignored, 1=fully trusted)")
 
-    print("\n=== Evaluating ARIMA baseline (walk-forward, subsampled origins) ===")
-    arima_report = evaluate_arima(panel, test_ds, horizon=DATA_CFG.horizon, max_origins=15 if quick else 40)
-    if arima_report:
+    # Both classical baselines are refit at EVERY test origin -- the same
+    # origins the Hybrid is scored on. (The earlier 40-origin subsample
+    # biased the comparison; quick smoke runs still subsample.)
+    print("\n=== Evaluating ARIMA baseline (FULL walk-forward, all test origins) ===")
+    arima_result = evaluate_arima(panel, test_ds, horizon=DATA_CFG.horizon, max_origins=15 if quick else None)
+    if arima_result:
+        arima_report, a_true, a_pred, a_origins = arima_result
         reports["ARIMA"] = arima_report
+        reports["ARIMA"]["event_window"] = event_window_metrics(a_true, a_pred) if len(a_origins) == len(test_ds.indices) else None
+        export_predictions_csv("ARIMA", a_true, a_pred)
+        record_price_predictions("ARIMA", a_true, a_pred)
 
-    print("\n=== Evaluating GARCH baseline (AR(1)-GARCH(1,1), walk-forward) ===")
-    garch_report = evaluate_garch(panel, test_ds, horizon=DATA_CFG.horizon, max_origins=15 if quick else 40)
-    if garch_report:
+    print("\n=== Evaluating GARCH baseline (AR(1)-GARCH(1,1), FULL walk-forward) ===")
+    garch_result = evaluate_garch(panel, test_ds, horizon=DATA_CFG.horizon, max_origins=15 if quick else None)
+    if garch_result:
+        garch_report, g_true, g_pred, g_origins = garch_result
         reports["GARCH"] = garch_report
+        reports["GARCH"]["event_window"] = event_window_metrics(g_true, g_pred) if len(g_origins) == len(test_ds.indices) else None
+        export_predictions_csv("GARCH", g_true, g_pred)
+        record_price_predictions("GARCH", g_true, g_pred)
 
     print("\n=== Summary (overall test-set metrics) ===")
     for name, rep in reports.items():

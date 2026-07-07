@@ -66,6 +66,14 @@ class ModelConfig:
     transformer_causal: bool = True
 
     horizon: int = 10                # k, duplicated here for model-local use
+    # Modality masking: during training, each sample's ENTIRE sentiment
+    # stream (the last n_sentiment_features columns) is zeroed with this
+    # probability. News coverage is dense only for recent years (GDELT's
+    # archive starts in 2017), so without masking the network either
+    # over-relies on sentiment where it exists or learns to ignore it
+    # everywhere; masking conditions it to treat news as a dynamic,
+    # sometimes-absent shock channel rather than an always-on feature.
+    sentiment_dropout_p: float = 0.4
     regime_hidden: int = 64           # hidden size of the volatility regime detector / decoder heads
     decoder_dropout: float = 0.3      # dropout inside the regime-aware decoder heads
     skip_embed_dim: int = 32          # width of the raw macro+sentiment skip-connection embedding

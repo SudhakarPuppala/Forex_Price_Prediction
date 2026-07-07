@@ -83,19 +83,41 @@ def evaluate_deep_model(model, dataset, model_name: str, device: str = "cpu"):
     return report, y_true, y_pred, regime_labels
 
 
-def evaluate_arima(panel, test_ds, horizon: int, max_origins: int = 40, order=(2, 1, 2)):
-    """ARIMA is refit at every forecast origin (walk-forward), which is
-    expensive; we subsample test origins for tractability in this demo
-    (`max_origins`), matching common practice for classical-baseline
-    comparison runs. Increase `max_origins` for a fuller benchmark.
+# ARIMA/GARCH are deterministic given the price series, and full-origin
+# walk-forward refitting is expensive (~1-2s per origin), so results are
+# cached across the seeds of a multi-seed run. Keyed by (model, horizon,
+# a hash of the close series, n_origins).
+_BASELINE_CACHE: dict = {}
+
+
+def _baseline_cache_key(name, close, origins, horizon):
+    import hashlib
+
+    h = hashlib.md5(close.tobytes()).hexdigest()
+    return (name, h, len(origins), int(origins[0]), int(origins[-1]), horizon)
+
+
+def evaluate_arima(panel, test_ds, horizon: int, max_origins: int = None, order=(2, 1, 2)):
+    """ARIMA refit at EVERY test origin (full walk-forward). The earlier
+    40-origin subsample biased the comparison -- the deep model was scored
+    on the full test set while the baselines only saw a sparse sample of
+    it; both are now evaluated on identical origins. `max_origins` remains
+    available for quick smoke runs only. Results are cached across seeds
+    (the fit is deterministic given the data).
     """
     close = panel.close
     origins = test_ds.indices
-    if len(origins) > max_origins:
+    if max_origins is not None and len(origins) > max_origins:
         step = max(1, len(origins) // max_origins)
         origins = origins[::step][:max_origins]
 
-    preds, valid_origins = rolling_arima_evaluation(close, origins, horizon, order=order)
+    key = _baseline_cache_key("arima", close, origins, horizon)
+    if key in _BASELINE_CACHE:
+        preds, valid_origins = _BASELINE_CACHE[key]
+        print(f"[baseline] ARIMA: reusing cached full walk-forward ({len(valid_origins)} origins)")
+    else:
+        preds, valid_origins = rolling_arima_evaluation(close, origins, horizon, order=order)
+        _BASELINE_CACHE[key] = (preds, valid_origins)
     if len(valid_origins) == 0:
         return None
 
@@ -112,21 +134,27 @@ def evaluate_arima(panel, test_ds, horizon: int, max_origins: int = 40, order=(2
         "regime_segmented": regime_segmented_metrics(y_true, preds, regime_labels),
         "n_origins_evaluated": len(valid_origins),
     }
-    return report
+    return report, y_true, preds, valid_origins
 
 
-def evaluate_garch(panel, test_ds, horizon: int, max_origins: int = 40):
-    """AR(1)-GARCH(1,1) walk-forward evaluation at subsampled test origins,
-    mirroring evaluate_arima's contract (see baselines/garch_baseline.py)."""
+def evaluate_garch(panel, test_ds, horizon: int, max_origins: int = None):
+    """AR(1)-GARCH(1,1) walk-forward at EVERY test origin, mirroring
+    evaluate_arima's contract and caching (see baselines/garch_baseline.py)."""
     from baselines.garch_baseline import rolling_garch_evaluation
 
     close = panel.close
     origins = test_ds.indices
-    if len(origins) > max_origins:
+    if max_origins is not None and len(origins) > max_origins:
         step = max(1, len(origins) // max_origins)
         origins = origins[::step][:max_origins]
 
-    preds, valid_origins = rolling_garch_evaluation(close, origins, horizon)
+    key = _baseline_cache_key("garch", close, origins, horizon)
+    if key in _BASELINE_CACHE:
+        preds, valid_origins = _BASELINE_CACHE[key]
+        print(f"[baseline] GARCH: reusing cached full walk-forward ({len(valid_origins)} origins)")
+    else:
+        preds, valid_origins = rolling_garch_evaluation(close, origins, horizon)
+        _BASELINE_CACHE[key] = (preds, valid_origins)
     if len(valid_origins) == 0:
         return None
 
@@ -136,10 +164,11 @@ def evaluate_garch(panel, test_ds, horizon: int, max_origins: int = 40):
     ])
     regime_labels = label_regimes(panel.realized_vol[valid_origins])
 
-    return {
+    report = {
         "model": "GARCH",
         "overall": summarize(y_true, preds),
         "per_horizon": per_horizon_metrics(y_true, preds),
         "regime_segmented": regime_segmented_metrics(y_true, preds, regime_labels),
         "n_origins_evaluated": len(valid_origins),
     }
+    return report, y_true, preds, valid_origins
