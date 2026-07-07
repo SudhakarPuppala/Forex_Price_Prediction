@@ -116,6 +116,7 @@ def train_model(
     device: str = "cpu",
     directional_weight: float = None,
     classification_weight: float = None,
+    seed: int = None,
 ):
     epochs = epochs or TRAIN_CFG.epochs
     lr = lr or TRAIN_CFG.lr
@@ -123,7 +124,14 @@ def train_model(
     directional_weight = TRAIN_CFG.directional_loss_weight if directional_weight is None else directional_weight
     classification_weight = TRAIN_CFG.classification_loss_weight if classification_weight is None else classification_weight
 
-    torch.manual_seed(TRAIN_CFG.seed)
+    # Seed the training RNG (batch shuffling order) with the RUN's seed,
+    # not a fixed constant. The old fixed TRAIN_CFG.seed here meant
+    # "multi-seed" runs on real data were near-identical replicas: the
+    # --seeds argument only varied synthetic DATA generation, so with real
+    # prices/macro/news nothing varied at all (exposed by a 3-seed run
+    # with std +/- 0.000 on every model). Model INITIALISATION is seeded
+    # separately in main.py before each model is constructed.
+    torch.manual_seed(seed if seed is not None else TRAIN_CFG.seed)
     model.to(device)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True)

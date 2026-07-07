@@ -1,0 +1,147 @@
+{
+  "seeds": [
+    9,
+    36,
+    99
+  ],
+  "seed_ensemble": {
+    "metrics": {
+      "MAE": 0.02080810062269426,
+      "RMSE": 0.028721856048148732,
+      "MAPE": 665.3640354826205,
+      "R2": -0.10387516613957337,
+      "DirectionalAccuracy": 0.5271309771309771,
+      "DirAcc@20pctCoverage": 0.5628898128898129,
+      "DirAcc@10pctCoverage": 0.6070686070686071
+    },
+    "n_test_windows": 962
+  },
+  "event_window": {
+    "Hybrid_CNN_LSTM_Transformer": [
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.5185185185185185,
+        "DirAcc_nonevent": 0.5279228149829739,
+        "MAE_event": 0.02123909443616867
+      },
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.5160493827160494,
+        "DirAcc_nonevent": 0.5267877412031782,
+        "MAE_event": 0.021242579445242882
+      },
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.5160493827160494,
+        "DirAcc_nonevent": 0.5267877412031782,
+        "MAE_event": 0.021242579445242882
+      }
+    ],
+    "Vanilla_LSTM": [
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.5333333333333333,
+        "DirAcc_nonevent": 0.513961407491487,
+        "MAE_event": 0.02431291900575161
+      },
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.5333333333333333,
+        "DirAcc_nonevent": 0.513961407491487,
+        "MAE_event": 0.02431291900575161
+      },
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.5333333333333333,
+        "DirAcc_nonevent": 0.513961407491487,
+        "MAE_event": 0.02431291900575161
+      }
+    ],
+    "Simplified_TFT": [
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.6320987654320988,
+        "DirAcc_nonevent": 0.5633371169125994,
+        "MAE_event": 0.017637837678194046
+      },
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.6320987654320988,
+        "DirAcc_nonevent": 0.5633371169125994,
+        "MAE_event": 0.017637837678194046
+      },
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.6320987654320988,
+        "DirAcc_nonevent": 0.5633371169125994,
+        "MAE_event": 0.017637837678194046
+      }
+    ],
+    "ARIMA": [
+      null,
+      null,
+      null
+    ],
+    "Random_Walk_Drift": [
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.6432098765432098,
+        "DirAcc_nonevent": 0.5709421112372304,
+        "MAE_event": 0.018357137218117714
+      },
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.6432098765432098,
+        "DirAcc_nonevent": 0.5709421112372304,
+        "MAE_event": 0.018357137218117714
+      },
+      {
+        "n_event_origins": 81,
+        "event_coverage": 0.0841995841995842,
+        "DirAcc_event": 0.6432098765432098,
+        "DirAcc_nonevent": 0.5709421112372304,
+        "MAE_event": 0.018357137218117714
+      }
+    ]
+  },
+  "calibrated_abstention": [
+    {
+      "conf_quantile": 0.5,
+      "tau": 0.004506407771259546,
+      "val_selective_acc": 0.47962962962962963,
+      "val_coverage": 0.5,
+      "test_coverage": 0.5966735966735967,
+      "test_selective_acc": 0.547212543554007,
+      "test_acc_unfiltered": 0.5271309771309771
+    },
+    {
+      "conf_quantile": 0.5,
+      "tau": 0.004188672639429569,
+      "val_selective_acc": 0.4806584362139918,
+      "val_coverage": 0.5,
+      "test_coverage": 0.6016632016632016,
+      "test_selective_acc": 0.5409467864547339,
+      "test_acc_unfiltered": 0.5258835758835759
+    },
+    {
+      "conf_quantile": 0.5,
+      "tau": 0.004188672639429569,
+      "val_selective_acc": 0.4806584362139918,
+      "val_coverage": 0.5,
+      "test_coverage": 0.6016632016632016,
+      "test_selective_acc": 0.5409467864547339,
+      "test_acc_unfiltered": 0.5258835758835759
+    }
+  ]
+}

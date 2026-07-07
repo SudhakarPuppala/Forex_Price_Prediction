@@ -156,13 +156,14 @@ def run(
     test_ds_xgb = XGBAugmentedDataset(test_ds, xgb)
 
     print("\n=== Training Hybrid CNN-LSTM-Transformer (+ internally-fused XGBoost branch) ===")
+    torch.manual_seed(seed)  # seed the MODEL INITIALISATION with the run's seed
     hybrid = HybridCNNLSTMTransformer()
     print(f"Hybrid model parameters: {hybrid.count_parameters():,} ({hybrid.count_parameters()/1e6:.2f}M)")
     # A deeper Transformer stack typically needs a lower learning rate than
     # a small single-layer LSTM to train stably -- standard practice, not a
     # thumb on the comparison scale (the simpler baselines are still tuned
     # at their own sensible default of TRAIN_CFG.lr).
-    hybrid, hist = train_model(hybrid, train_ds_xgb, val_ds_xgb, epochs=epochs, lr=TRAIN_CFG.lr * 0.5, device=device, classification_weight=classification_weight)
+    hybrid, hist = train_model(hybrid, train_ds_xgb, val_ds_xgb, epochs=epochs, lr=TRAIN_CFG.lr * 0.5, device=device, classification_weight=classification_weight, seed=seed)
     reports["Hybrid_CNN_LSTM_Transformer"], y_true, y_pred, _ = evaluate_deep_model(hybrid, test_ds_xgb, "Hybrid_CNN_LSTM_Transformer", device=device)
     record_price_predictions("Hybrid_CNN_LSTM_Transformer", y_true, y_pred)
     export_predictions_csv("Hybrid_CNN_LSTM_Transformer", y_true, y_pred)
@@ -184,16 +185,18 @@ def run(
     print(f"[hybrid] learned average XGBoost trust weight on test set: {avg_xgb_trust:.3f} (0=ignored, 1=fully trusted)")
 
     print("\n=== Training Vanilla LSTM baseline ===")
+    torch.manual_seed(seed + 1)
     vlstm = VanillaLSTM()
-    vlstm, _ = train_model(vlstm, train_ds, val_ds, epochs=epochs, device=device, classification_weight=classification_weight)
+    vlstm, _ = train_model(vlstm, train_ds, val_ds, epochs=epochs, device=device, classification_weight=classification_weight, seed=seed)
     reports["Vanilla_LSTM"], y_true, y_pred, _ = evaluate_deep_model(vlstm, test_ds, "Vanilla_LSTM", device=device)
     record_price_predictions("Vanilla_LSTM", y_true, y_pred)
     export_predictions_csv("Vanilla_LSTM", y_true, y_pred)
     reports["Vanilla_LSTM"]["event_window"] = event_window_metrics(y_true, y_pred)
 
     print("\n=== Training Simplified TFT baseline ===")
+    torch.manual_seed(seed + 2)
     tft = SimplifiedTFT()
-    tft, _ = train_model(tft, train_ds, val_ds, epochs=epochs, device=device, classification_weight=classification_weight)
+    tft, _ = train_model(tft, train_ds, val_ds, epochs=epochs, device=device, classification_weight=classification_weight, seed=seed)
     reports["Simplified_TFT"], y_true, y_pred, _ = evaluate_deep_model(tft, test_ds, "Simplified_TFT", device=device)
     record_price_predictions("Simplified_TFT", y_true, y_pred)
     export_predictions_csv("Simplified_TFT", y_true, y_pred)
