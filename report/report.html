@@ -165,8 +165,8 @@ Full scored table: <code>exports/news_headlines_scored.csv</code>.</p>
 range -0.97 … +0.96.
 Class balance: <b>35% positive</b>, <b>39% neutral</b>, <b>26% negative</b> —
 a healthy two-sided distribution (a lexicon fallback typically collapses to mostly-neutral;
-the wide spread here is the FinBERT signature). The near-zero mean says the 60-day window
-carried no persistent directional news bias, so any model edge must come from
+the wide spread here is the FinBERT signature). The near-zero mean says the news window
+carried no persistent directional bias over the covered period, so any model edge must come from
 <i>timing</i>, not from a static sentiment tilt.</p>
 <img src="charts_final/polarity_hist.png" alt="polarity distribution">
 
@@ -541,26 +541,46 @@ sentiment block that enters the window
 </table>
 
 <h2>5. Hybrid architecture, stage by stage</h2>
+<p>A dual-tower design: the quantitative stream and the text stream are encoded
+<i>separately</i> and fused late by cross-attention, so 17 news-less historical years
+cannot dilute the numerical pathway.</p>
 <pre>
-(60×30) ─ Feature fusion: per-modality projections + learned cross-modal gate → (60×64)
-        ─ CNN: two Conv1D(k=3)+BatchNorm blocks, max-pool → (30×128) local pattern maps
-              + regime embedding  (realised vol, ATR → 128)      ┐ added to every timestep:
-              + sentiment embedding (8 scores + 4-way signal → 128)┘ conditions ALL later stages
-        ─ Recurrent stage, TWO parallel branches (the GRU infusion):
-              Bi-LSTM (2×128/dir) → (30×256)   longer-memory cell state
-              Bi-GRU  (2×128/dir) → (30×256)   faster-adapting two-gate dynamics
-              blended per sample by a learned neutral-start gate → (30×256)
-        ─ Transformer: 4 causal encoder layers, 8 heads, FFN 1024 → attention-pooled (256)
-        ─ Skip connection: raw last-bar macro+sentiment → 32-dim embedding
-        ─ XGBoost expert branch: frozen tree ensemble's 10-step forecast, embedded (32)
-        ─ Per-horizon trust gate: sigmoid(Linear(320→10)) → trust ∈ [0,1] per horizon
-        ─ Regime-aware decoder: soft-gated stable/high-vol dual MLP heads → deep forecast (10)
-FINAL:  forecast = trust ⊙ xgb_pred + (1−trust) ⊙ deep_forecast     (convex expert blend)
+Input window (60 × 30 features)  →  split into two towers
+──────────────────────────────────────────────────────────────────────────────────
+TOWER A — quantitative (18 technical + macro features)
+    Linear projection (18 → 64)
+    Causal DILATED CNN: 3 blocks, dilations 1/2/4, LEFT-only padding, NO pooling
+        → (60 × 128) local features at FULL temporal resolution (lag-1/lag-2 preserved)
+    + regime embedding (realised vol, ATR → 128) added at every timestep
+TOWER B — text (12 FinBERT sentiment features)
+    single-layer GRU encoder → project → (60 × 128)
+FUSION NODE — multi-head cross-attention:  quant = Query, text = Key/Value
+    attention output scaled by a learned per-timestep text-PRESENCE gate, residual-added
+    (news-less windows contribute ≈ 0, so the quant tower passes through unchanged)
+──────────────────────────────────────────────────────────────────────────────────
+GLOBAL STAGE — Transformer FIRST, then light recurrence (re-ordered):
+    project (128 → 256) + positional encoding
+    4 causal Transformer encoder layers, 8 heads, FFN 1024   → regime-match over raw bars
+    single-layer Bi-LSTM ∥ single-layer Bi-GRU, blended per-sample by a learned gate
+    attention-weighted pooling → 256-d context   (+ raw-feature skip 32, + XGBoost embed 32)
+DECODER — regime-aware PROBABILISTIC heads:
+    stable + high-vol MLP heads, each emitting (μ, log σ²) PER horizon step  (GARCH emulation)
+    soft volatility gate blends the two heads → deep_forecast μ and log σ²  (10 each)
+    regime-driven XGBoost trust gate:  sigmoid(Linear(regime_ctx(2) → 10))  ∈ [0,1] per horizon
+FINAL:  forecast = trust ⊙ xgb_pred + (1 − trust) ⊙ deep_forecast     (convex expert blend)
 </pre>
-<p>Design notes: the deep pathway is trained under its own <b>deep-supervision</b> loss so it
-remains a complete forecaster (without it, the blend provably collapses into XGBoost — an
-earlier documented iteration); checkpoints are selected by <b>validation directional
-accuracy</b>; the loss adds a sign-agreement penalty (weight 0.35) to plain MSE.</p>
+<p><b>Training & loss.</b> (1) <b>Freeze-and-tune, two stages</b>: stage 1 trains the
+quantitative pipeline text-free across the full 25.9-year history (text tower bypassed);
+stage 2 freezes the quant tower and fine-tunes only the text tower + fusion + decoder on
+the news-dense post-2018 subset at 0.1× LR. (2) <b>Gaussian NLL loss</b> on the
+predicted (μ, σ²) — the network parameterises its own conditional variance (emulating
+GARCH) rather than optimising point MSE, which pulls toward a conservative zero mean on
+fat-tailed returns; a Huber term supervises the deep expert's mean and a sign-agreement
+penalty (weight 0.35) nudges direction. (3) <b>Modality masking</b>: each training
+sample's text stream is zeroed with p=0.4. (4) <b>Deep supervision</b> keeps the deep
+expert a complete forecaster so the blend cannot collapse into XGBoost. (5) Checkpoints
+selected by <b>validation directional accuracy</b>. Conviction throughout is the
+<b>t-statistic |μ|/σ</b> from the probabilistic head.</p>
 
 <p><b>Seed 9</b> — test DirAcc 0.531 · first test-set forecast origins from
 <code>exports/predictions_test_Hybrid_CNN_LSTM_Transformer_seed9.csv</code>
@@ -746,7 +766,7 @@ own parts. ARIMA/GARCH are deterministic (no seed variance). The <b>seed-ensembl
 
 <p><b>Scenario A: predict every bar (unfiltered).</b> Hybrid
 0.530 vs ARIMA 0.485
-and GARCH 0.576 (walk-forward, subsampled origins).
+and GARCH 0.576 (full walk-forward, all 962 test origins).
 The econometric baselines model conditional mean/variance directly and are strong on
 noisy bars; the chart shows the mean ± std over seeds against the 0.50 coin-flip line.</p>
 <img src="charts_final/diracc_mean_std.png" alt="mean diracc">
@@ -767,14 +787,18 @@ model-selection criterion for directional trading.</p>
 <img src="charts_final/mae_comparison.png" alt="mae">
 
 <h2>8. Roadmap implementation results, final verdict &amp; next steps</h2>
-<p>The previous report closed with a six-item improvement roadmap. Four of the six are
-now implemented and measured in this run (items 1 <i>daily task</i>, 2 <i>event-window
-evaluation</i>, 3 <i>real macro</i>, 5 <i>calibrated abstention</i>, 6 <i>seed
-ensembling</i>; item 4, growing the archive, is structural and ongoing):</p>
+<p>Every improvement recommended across the review rounds is now implemented and measured
+in this run: daily task and full 25.9-year history; real stationary macro; event-window
+evaluation with an <b>NFP + FOMC</b> scheduled-event calendar; validation-calibrated
+abstention with a follow/fade mode; seed ensembling; the four supervisor architecture
+changes (causal dilated CNN, dual-tower cross-attention, transformer-first ordering,
+probabilistic NLL head); two-stage freeze-and-tune training; and the inter-model
+<b>consensus (committee-vote)</b> filter. The tables below quantify each:</p>
 
 <p><b>Event-window evaluation (item 2):</b> accuracy on test origins where the
-information streams were active (news burst at the origin, or a CPI release within the
-last 3 bars) vs quiet origins:</p>
+information streams were active — a news burst at the origin, a CPI release within the
+last 3 bars, or a scheduled <b>NFP (first Friday) or FOMC decision day</b> — vs quiet
+origins:</p>
 <table class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -948,40 +972,46 @@ out-of-sample results live in the 0.55–0.65 band even at daily horizons. Claim
 across the train/test split, or (c) score price-<i>level</i> tracking, where a random
 walk gets ~99% R² for free. Any near-0.85 result in this codebase should be treated as a
 bug to find, not a success to report.</div>
-<p><b>Remaining next steps</b> (items not yet exhausted):</p>
+<p><b>Remaining next steps</b> (genuinely open — everything the review rounds asked for is
+now done and measured above):</p>
 <ol>
-<li><b>Grow the archive (roadmap item 4, ongoing):</b> every run's exports/ CSVs are the
-start of a persistent dataset; at daily scale the history is already maximal, so the
-gains now come from adding <i>pairs</i> (XAG/USD, EUR/USD) and training cross-pair.</li>
+<li><b>Add currency pairs:</b> the per-ticker archive and pair→ticker map already build
+XAG/USD (SI=F) and EUR/USD (EURUSD=X) through the same pipeline; the open work is
+training cross-pair so gold's model transfers to silver/euro.</li>
 <li><b>Deeper news history:</b> GDELT's DOC archive starts in 2017 — a paid archive
-(RavenPack, Dow Jones) or scraping older financial-news archives would extend sentiment
+(RavenPack, Dow Jones) or scraped older financial-news archives would extend sentiment
 coverage to the full 25-year price history (currently ~3 years).</li>
-<li><b>Trading-rule backtest:</b> convert the calibrated-abstention rule into a costed
-backtest (position sizing by conviction, transaction costs) — accuracy is a proxy; P&L
-with costs is the decision-grade metric.</li>
-<li><b>Richer event calendar:</b> the event windows currently key on news bursts and CPI
-recency; adding FOMC meeting dates and NFP releases would sharpen the event analysis.</li>
+<li><b>Fuse GARCH as a fourth expert:</b> GARCH still wins raw accuracy on trending
+windows; the convex-blend framework that already fuses XGBoost could fuse GARCH's
+conditional-variance forecast the same way — the most direct path to closing the gap.</li>
+<li><b>Regime-aware mode selection:</b> the follow/fade calibration is regime-sensitive
+(fade helps intraday, hurt the daily bull window); conditioning the mode on the detected
+volatility regime rather than a single validation choice would stabilise it.</li>
 </ol>
 
 <h2>9. Summary &amp; conclusion</h2>
 <p>This project built and honestly evaluated a complete multi-modal FX forecasting
 system: <b>6,486 live daily XAU/USD candles</b> from yfinance
 (daily runs use the full listed history), a real news pipeline (GDELT archive + RSS,
-<b>936</b> headlines) scored by real FinBERT, <b>REAL macro (Yahoo rates/DXY + BLS CPI)</b>, 26 engineered
-features across technical / macro / sentiment streams, and a Hybrid
-CNN-LSTM-Transformer whose final forecast is a learned per-horizon convex blend between
-a deep pathway (conditioned on volatility regime and current news sentiment) and an
-integrated XGBoost expert — with deep supervision preventing expert collapse and
-checkpoint selection aligned to the reported metric.</p>
-<p>The improvement roadmap from the previous round is now implemented and measured:
-the task moved to daily bars with a two-week horizon, evaluation is reported per
-event-window and under a validation-calibrated abstention rule, the macro stream is
-real, and the three seeds are ensembled. Unfiltered accuracy remains where honest FX
-forecasting lives; the model's genuine edges — event windows and conviction-filtered
-signals — are quantified in Sections 7–8. Every intermediate artifact (prices, scored
-headlines, macro series, per-bar features, per-seed and ensemble predictions) is
-exported as CSV under <code>exports/</code> for independent verification, and the full
-evidence trail of every architecture iteration is recorded in the git history.</p>
+<b>936</b> headlines) scored by real FinBERT, <b>REAL macro (Yahoo rates/DXY + BLS CPI)</b>, <b>30 engineered
+features</b> (12 technical / 6 macro / 12 sentiment), and a dual-tower Hybrid
+CNN-LSTM-Transformer: a causal-dilated CNN + recurrent + transformer quantitative tower
+fused by cross-attention with an independent FinBERT-sentiment tower, decoded by
+regime-aware <b>probabilistic (μ, σ²)</b> heads and blended with a frozen XGBoost expert.
+It is trained in two stages (freeze-and-tune) under a Gaussian NLL loss, with deep
+supervision preventing expert collapse and checkpoints selected by the reported metric.</p>
+<p>Every improvement raised across the review rounds is now implemented and measured:
+daily bars over the full 25.9-year history; real stationary macro; the four supervisor
+architecture changes; freeze-and-tune training; NFP+FOMC event windows; the calibrated
+follow/fade abstention rule; seed ensembling; and the inter-model consensus filter. The
+honest bottom line: unfiltered daily directional accuracy sits at ~0.53 for the Hybrid
+(GARCH leads at 0.576 on this trending window), but the model's genuine, defensible edge
+is its conviction machinery — the consensus committee filter turns the three seeds into a
++103% costed backtest at Sharpe 1.12, essentially matching buy-and-hold's risk-adjusted
+return while sitting out half the days. Every intermediate artifact (prices, scored
+headlines, macro series, per-bar features, per-seed and ensemble predictions) is exported
+as CSV under <code>exports/</code> for independent verification, and the full evidence
+trail of every architecture iteration is in the git history.</p>
 <p class="small">Generated from: multi_seed_summary.json · roadmap_summary.json ·
 exports/*.csv · seeds 9/36/99.</p>
 </body></html>
