@@ -265,49 +265,6 @@ def run(
         export_predictions_csv("GARCH", g_true, g_pred)
         record_price_predictions("GARCH", g_true, g_pred)
 
-    # --- Regime-gated GARCH<->Hybrid decision-layer blend -------------------
-    # GARCH leads raw DirAcc on trending/high-vol windows; the Hybrid leads in
-    # choppy regimes. Blend them per volatility regime with a convex weight +
-    # follow/fade mode CALIBRATED ON VALIDATION, applied frozen to test. This
-    # is the direct path to beating GARCH's directional accuracy.
-    if garch_result and not quick:
-        from training.evaluate import garch_preds_for_origins
-        from utils.regime_blend import label_regimes_fixed, regime_gated_blend
-
-        def _align(hyb_pred, hyb_origins, gar_pred, gar_origins):
-            """Restrict two (pred, origins) sets to their common origins, in the
-            hybrid's origin order. Returns (hyb_rows, gar_rows, origins, hyb_idx)."""
-            gmap = {int(o): i for i, o in enumerate(gar_origins)}
-            hi, gi, ors = [], [], []
-            for i, o in enumerate(hyb_origins):
-                if int(o) in gmap:
-                    hi.append(i); gi.append(gmap[int(o)]); ors.append(int(o))
-            return hyb_pred[hi], gar_pred[gi], np.array(ors), hi
-
-        vg_pred, vg_origins = garch_preds_for_origins(panel, val_ds.indices, DATA_CFG.horizon)
-        val_h, val_g, val_or, val_hi = _align(val_pred, list(val_ds.indices), vg_pred, vg_origins)
-        test_h, test_g, test_or, test_hi = _align(y_pred, list(test_ds.indices), g_pred, list(g_origins))
-        ref_vol = panel.realized_vol[np.array(list(train_ds.indices))]
-        val_reg = label_regimes_fixed(panel.realized_vol, val_or, ref_vol)
-        test_reg = label_regimes_fixed(panel.realized_vol, test_or, ref_vol)
-        blend = regime_gated_blend(
-            val_true[val_hi], val_h, val_g, val_reg,
-            y_true[test_hi], test_h, test_g, test_reg,
-        )
-        reports["Hybrid_CNN_LSTM_Transformer"]["garch_blend"] = blend
-        # Persist the blend inputs so the decision-layer rule can be re-tuned
-        # OFFLINE (no retrain) -- the calibration is deterministic given these.
-        try:
-            np.savez(f"exports/blend_inputs_seed{seed}.npz",
-                     val_true=val_true[val_hi], val_hybrid=val_h, val_garch=val_g, val_reg=val_reg,
-                     test_true=y_true[test_hi], test_hybrid=test_h, test_garch=test_g, test_reg=test_reg)
-        except Exception:
-            pass
-        rule_str = ", ".join(f"r{k}:w={v['w']}/{v['mode']}" for k, v in blend["per_regime"].items())
-        print(f"[blend] regime-gated GARCH<->Hybrid: blended DirAcc {blend['blended_diracc']:.3f} "
-              f"vs Hybrid {blend['hybrid_diracc']:.3f} / GARCH {blend['garch_diracc']:.3f} "
-              f"(per-regime {rule_str})")
-
     print("\n=== Summary (overall test-set metrics) ===")
     for name, rep in reports.items():
         o = rep["overall"]

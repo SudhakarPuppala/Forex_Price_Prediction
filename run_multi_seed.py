@@ -178,25 +178,6 @@ def multi_seed_evaluation(seeds, **run_kwargs):
         all_runs[0][hybrid_key].get("xgb_feature_importance") if hybrid_key in all_runs[0] else None
     )
 
-    # Regime-gated GARCH<->Hybrid blend: aggregate the per-seed blended DirAcc
-    # (the "beat GARCH" headline) across seeds.
-    blends = [run[hybrid_key].get("garch_blend") for run in all_runs if hybrid_key in run]
-    blends = [b for b in blends if b]
-    if blends:
-        blended = np.array([b["blended_diracc"] for b in blends])
-        roadmap["garch_blend"] = {
-            "blended_diracc_mean": float(blended.mean()),
-            "blended_diracc_std": float(blended.std()),
-            "hybrid_diracc_mean": float(np.mean([b["hybrid_diracc"] for b in blends])),
-            "garch_diracc": float(blends[0]["garch_diracc"]),  # deterministic across seeds
-            "per_seed": blends,
-        }
-        gb = roadmap["garch_blend"]
-        print(f"[blend] regime-gated GARCH<->Hybrid blend across {len(blends)} seeds: "
-              f"blended DirAcc {gb['blended_diracc_mean']:.4f} +/-{gb['blended_diracc_std']:.4f} "
-              f"vs Hybrid {gb['hybrid_diracc_mean']:.4f} / GARCH {gb['garch_diracc']:.4f} "
-              f"({'BEATS' if gb['blended_diracc_mean'] > gb['garch_diracc'] else 'below'} GARCH)")
-
     consensus = build_consensus_filter(seeds)
     roadmap["consensus"] = consensus
     if consensus:

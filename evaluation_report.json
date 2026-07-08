@@ -3067,68 +3067,6 @@
         ]
       ],
       "regime_ctx_importance": 0.03654852882027626
-    },
-    "garch_blend": {
-      "weight_grid": [
-        0.0,
-        0.1,
-        0.2,
-        0.3,
-        0.4,
-        0.5,
-        0.6,
-        0.7,
-        0.8,
-        0.9,
-        1.0
-      ],
-      "reference_threshold_quantile": 0.7,
-      "anchor": "garch",
-      "deviate_margin": 0.02,
-      "per_regime": {
-        "0": {
-          "w": 1.0,
-          "mode": "follow",
-          "val_diracc": 0.574935064935065,
-          "n_val": 770,
-          "adopted": false
-        },
-        "1": {
-          "w": 1.0,
-          "mode": "follow",
-          "val_diracc": 0.5227722772277228,
-          "n_val": 202,
-          "adopted": false
-        }
-      },
-      "global_rule": {
-        "w": 1.0,
-        "mode": "follow",
-        "val_diracc": 0.5640946502057613
-      },
-      "blended_diracc": 0.5756756756756757,
-      "hybrid_diracc": 0.5044698544698545,
-      "garch_diracc": 0.5756756756756757,
-      "blended_mae": 0.019628064706921577,
-      "hybrid_mae": 0.022728390991687775,
-      "garch_mae": 0.019628064706921577,
-      "n_test": 962,
-      "regime_coverage": {
-        "0": 0.6798336798336798,
-        "1": 0.3201663201663202
-      },
-      "per_regime_test_diracc": {
-        "0": {
-          "blended": 0.578440366972477,
-          "hybrid": 0.499388379204893,
-          "garch": 0.578440366972477
-        },
-        "1": {
-          "blended": 0.5698051948051948,
-          "hybrid": 0.5152597402597403,
-          "garch": 0.5698051948051948
-        }
-      }
     }
   },
   "ARIMA": {

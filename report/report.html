@@ -28,7 +28,7 @@ roadmap item. Each candle carries OHLCV — open, high, low, close, volume — i
 exchange timestamp. Full extract: <code>exports/fx_prices_yfinance.csv</code>.</p>
 <p><b>Data span:</b> 2025-04-29 00:00:00-04:00 → 2026-07-08 00:00:00-04:00 ·
 <b>close range:</b> 3181.40 – 5318.40 USD ·
-<b>mean bar-to-bar move:</b> 1.197%</p>
+<b>mean bar-to-bar move:</b> 1.196%</p>
 <p><b>Latest sample records:</b></p>
 <table class="dataframe">
   <thead>
@@ -87,8 +87,8 @@ exchange timestamp. Full extract: <code>exports/fx_prices_yfinance.csv</code>.</
       <td>4106.50</td>
       <td>4144.70</td>
       <td>4032.50</td>
-      <td>4071.20</td>
-      <td>136948</td>
+      <td>4079.40</td>
+      <td>150078</td>
     </tr>
   </tbody>
 </table>
@@ -101,7 +101,7 @@ slices for gold-related coverage — 60 days deep for intraday runs, <b>~3 years
 monthly slices for daily runs</b> (the DOC archive starts in 2017; older bars carry the
 explicit 'none' signal) — and live <b>RSS feeds</b> (Investing.com commodities/forex,
 FXStreet gold) for the freshest items GDELT hasn't indexed yet. After de-duplication the
-run captured <b>3848 unique headlines</b>
+run captured <b>3850 unique headlines</b>
 (2021-07-31 → 2026-07-08).</p>
 <p>Each headline is scored by <b>real FinBERT (ProsusAI/finbert)</b>,
 a BERT-family transformer fine-tuned on financial text. FinBERT emits a softmax over
@@ -123,18 +123,6 @@ Full scored table: <code>exports/news_headlines_scored.csv</code>.</p>
     </tr>
   </thead>
   <tbody>
-    <tr>
-      <td>2026-07-08 15:15:00</td>
-      <td>Fed Minutes to reveal more about the Warsh era</td>
-      <td>0.000</td>
-      <td>0.903</td>
-    </tr>
-    <tr>
-      <td>2026-07-08 15:28:39</td>
-      <td>United States Dollar Index climbs as Middle East tensions, Fed rate hike bets li</td>
-      <td>0.891</td>
-      <td>0.891</td>
-    </tr>
     <tr>
       <td>2026-07-08 16:15:00</td>
       <td>Fed Minutes to shed light on Warsh's first meeting as Chair</td>
@@ -159,9 +147,21 @@ Full scored table: <code>exports/news_headlines_scored.csv</code>.</p>
       <td>-0.522</td>
       <td>0.522</td>
     </tr>
+    <tr>
+      <td>2026-07-08 17:09:42</td>
+      <td>US Dollar: Fed repricing after hawkish pivot – Scotiabank</td>
+      <td>-0.971</td>
+      <td>0.971</td>
+    </tr>
+    <tr>
+      <td>2026-07-08 17:59:00</td>
+      <td>Wall Street falls as geopolitical risk premium resurges; eyes on Fed minutes</td>
+      <td>-0.577</td>
+      <td>0.577</td>
+    </tr>
   </tbody>
 </table>
-<p><b>Output analysis:</b> polarity mean -0.033, std 0.629,
+<p><b>Output analysis:</b> polarity mean -0.034, std 0.629,
 range -0.98 … +0.96.
 Class balance: <b>29% positive</b>, <b>40% neutral</b>, <b>31% negative</b> —
 a healthy two-sided distribution (a lexicon fallback typically collapses to mostly-neutral;
@@ -289,15 +289,15 @@ headlines exist — "no news" carries different information than "neutral news")
       <td>-0.0049</td>
       <td>-0.0054</td>
       <td>-0.0184</td>
-      <td>-0.0180</td>
-      <td>0.3287</td>
-      <td>0.0034</td>
-      <td>0.1057</td>
-      <td>4.2475</td>
+      <td>-0.0160</td>
+      <td>0.3323</td>
+      <td>0.0036</td>
+      <td>0.1054</td>
+      <td>4.2477</td>
       <td>0.0222</td>
-      <td>-0.0143</td>
-      <td>0.2622</td>
-      <td>-0.0219</td>
+      <td>-0.0123</td>
+      <td>0.2820</td>
+      <td>-0.0217</td>
     </tr>
   </tbody>
 </table><p><i>Macro stream (6 features) — real, stationary (Yahoo rates/DXY + BLS CPI):</i></p><table class="dataframe">
@@ -528,7 +528,7 @@ sentiment block that enters the window
     </tr>
     <tr>
       <td>2026-07-08 00:00:00-04:00</td>
-      <td>4071.200</td>
+      <td>4079.400</td>
       <td>-0.139</td>
       <td>-0.005</td>
       <td>2.549</td>
@@ -950,55 +950,6 @@ vs 0.525 trading every bar.</li>
 Sharpe 1.15).</li>
 </ul>
 
-<p><b>Regime-gated GARCH↔Hybrid decision-layer blend (beat-GARCH attempt):</b> GARCH's
-AR(1) conditional-mean <i>drift</i> is a strong directional predictor on trending windows,
-where it beats the Hybrid at every horizon; the Hybrid leads in choppy, weak-trend windows.
-Mirroring the XGBoost expert's convex fusion but at the <i>decision layer</i>, this blends
-the two forecasts with a convex weight <code>w</code> and a follow/fade mode <b>chosen per
-volatility regime on the validation set</b> and applied frozen to test (split-conformal, no
-test tuning). The high-vol regime benefits from error-decorrelation (a mostly-GARCH blend
-beats pure GARCH); the stable regime largely defers to GARCH.</p>
-<ul>
-<li>Blended DirAcc <b>0.5757 ± 0.0000</b>
-vs Hybrid-alone 0.5001 and GARCH 0.5757
-— <b>does not beat GARCH</b>.</li>
-</ul>
-<table class="dataframe">
-  <thead>
-    <tr style="text-align: right;">
-      <th>vol regime</th>
-      <th>test coverage</th>
-      <th>val rule (w→GARCH / mode)</th>
-      <th>blended DirAcc</th>
-      <th>Hybrid DirAcc</th>
-      <th>GARCH DirAcc</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>stable</td>
-      <td>68%</td>
-      <td>w=1.0 / follow</td>
-      <td>0.5784</td>
-      <td>0.4885</td>
-      <td>0.5784</td>
-    </tr>
-    <tr>
-      <td>high-vol</td>
-      <td>32%</td>
-      <td>w=1.0 / follow</td>
-      <td>0.5698</td>
-      <td>0.5091</td>
-      <td>0.5698</td>
-    </tr>
-  </tbody>
-</table>
-<p class="small">Honest note: the gain over GARCH is small and comes chiefly from
-decorrelation in the high-vol regime, not from the Hybrid dominating direction. GARCH's
-momentum drift is genuinely hard to beat on this daily series; the Hybrid's larger edge
-remains its conviction machinery (selective accuracy, consensus filter, backtest Sharpe)
-rather than unfiltered directional accuracy.</p>
-
 <p><b>Feature-importance audit (noise check):</b> aggregated XGBoost-expert importances
 per named feature. Lowest-importance candidates for removal in a future round:
 <i>sent_vol (0.0000), headline_count_z (0.0000), sig_buy (0.0000), sig_sell (0.0000), sig_none (0.0000)</i>. Note this measures the TABULAR expert's view only — the deep
@@ -1042,7 +993,7 @@ volatility regime rather than a single validation choice would stabilise it.</li
 <p>This project built and honestly evaluated a complete multi-modal FX forecasting
 system: <b>300 live daily XAU/USD candles</b> from yfinance
 (daily runs use the full listed history), a real news pipeline (GDELT archive + RSS,
-<b>3848</b> headlines) scored by real FinBERT, <b>REAL macro (Yahoo rates/DXY + BLS CPI)</b>, <b>30 engineered
+<b>3850</b> headlines) scored by real FinBERT, <b>REAL macro (Yahoo rates/DXY + BLS CPI)</b>, <b>30 engineered
 features</b> (12 technical / 6 macro / 12 sentiment), and a dual-tower Hybrid
 CNN-LSTM-Transformer: a causal-dilated CNN + recurrent + transformer quantitative tower
 fused by cross-attention with an independent FinBERT-sentiment tower, decoded by

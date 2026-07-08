@@ -745,44 +745,6 @@ vs {cons['unfiltered_diracc']:.3f} trading every bar.</li>
 Sharpe {cb['buy_hold_sharpe']:.2f}).</li>
 </ul>
 """)
-        gb = rm.get("garch_blend")
-        if gb:
-            beats = gb["blended_diracc_mean"] > gb["garch_diracc"]
-            # Pull the per-regime rule + per-regime test DirAcc from seed 0's detail.
-            detail = gb["per_seed"][0]
-            reg_rows = []
-            for r, dd in detail.get("per_regime_test_diracc", {}).items():
-                rule = detail["per_regime"].get(r, {})
-                reg_rows.append({
-                    "vol regime": "high-vol" if r == "1" else "stable",
-                    "test coverage": f"{detail['regime_coverage'].get(r, 0)*100:.0f}%",
-                    "val rule (w→GARCH / mode)": f"w={rule.get('w','?')} / {rule.get('mode','?')}",
-                    "blended DirAcc": round(dd["blended"], 4),
-                    "Hybrid DirAcc": round(dd["hybrid"], 4),
-                    "GARCH DirAcc": round(dd["garch"], 4),
-                })
-            S.append(f"""
-<p><b>Regime-gated GARCH↔Hybrid decision-layer blend (beat-GARCH attempt):</b> GARCH's
-AR(1) conditional-mean <i>drift</i> is a strong directional predictor on trending windows,
-where it beats the Hybrid at every horizon; the Hybrid leads in choppy, weak-trend windows.
-Mirroring the XGBoost expert's convex fusion but at the <i>decision layer</i>, this blends
-the two forecasts with a convex weight <code>w</code> and a follow/fade mode <b>chosen per
-volatility regime on the validation set</b> and applied frozen to test (split-conformal, no
-test tuning). The high-vol regime benefits from error-decorrelation (a mostly-GARCH blend
-beats pure GARCH); the stable regime largely defers to GARCH.</p>
-<ul>
-<li>Blended DirAcc <b>{gb['blended_diracc_mean']:.4f} ± {gb['blended_diracc_std']:.4f}</b>
-vs Hybrid-alone {gb['hybrid_diracc_mean']:.4f} and GARCH {gb['garch_diracc']:.4f}
-— <b>{'edges past' if beats else 'does not beat'} GARCH</b>.</li>
-</ul>
-{df_to_html(pd.DataFrame(reg_rows), floatfmt="{:.4f}") if reg_rows else ''}
-<p class="small">Honest note: the gain over GARCH is small and comes chiefly from
-decorrelation in the high-vol regime, not from the Hybrid dominating direction. GARCH's
-momentum drift is genuinely hard to beat on this daily series; the Hybrid's larger edge
-remains its conviction machinery (selective accuracy, consensus filter, backtest Sharpe)
-rather than unfiltered directional accuracy.</p>
-""")
-
         if rm.get("feature_importance"):
             fi = rm["feature_importance"]
             bottom_txt = ", ".join(f"{n} ({v:.4f})" for n, v in fi["bottom"])

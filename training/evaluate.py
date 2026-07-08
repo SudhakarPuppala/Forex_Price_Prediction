@@ -102,26 +102,6 @@ def _baseline_cache_key(name, close, origins, horizon):
     return (name, h, len(origins), int(origins[0]), int(origins[-1]), horizon)
 
 
-def garch_preds_for_origins(panel, origins, horizon: int, max_origins: int = None):
-    """Cached AR(1)-GARCH(1,1) walk-forward point forecasts at ARBITRARY origins
-    (e.g. the validation split, for the regime-gated blend calibration). Mirrors
-    evaluate_garch's caching so the seeds of a multi-seed run reuse one compute.
-    Returns (preds (M, horizon), valid_origins)."""
-    from baselines.garch_baseline import rolling_garch_evaluation
-
-    close = panel.close
-    origins = list(origins)
-    if max_origins is not None and len(origins) > max_origins:
-        step = max(1, len(origins) // max_origins)
-        origins = origins[::step][:max_origins]
-    key = _baseline_cache_key("garch", close, origins, horizon)
-    if key in _BASELINE_CACHE:
-        return _BASELINE_CACHE[key]
-    res = rolling_garch_evaluation(close, origins, horizon)
-    _BASELINE_CACHE[key] = res
-    return res
-
-
 def evaluate_arima(panel, test_ds, horizon: int, max_origins: int = None, order=(2, 1, 2)):
     """ARIMA refit at EVERY test origin (full walk-forward). The earlier
     40-origin subsample biased the comparison -- the deep model was scored

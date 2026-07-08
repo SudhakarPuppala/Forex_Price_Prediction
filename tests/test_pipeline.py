@@ -647,43 +647,6 @@ def test_random_walk_baseline():
     print("[PASS] Random Walk with Drift baseline (Paper 1 Sec III.D)")
 
 
-def test_regime_gated_blend():
-    """The regime-gated GARCH<->Hybrid blend must (a) return the full schema,
-    (b) never do worse than the better single model when one clearly dominates,
-    and (c) defer (w->1) to the model that wins the validation regime."""
-    from utils.regime_blend import label_regimes_fixed, regime_gated_blend
-
-    rng = np.random.default_rng(3)
-    N, H = 300, DATA_CFG.horizon
-    true = rng.standard_normal((N, H)) * 0.01
-    regimes = (rng.random(N) > 0.6).astype(int)
-
-    # Deterministic dominance: GARCH's sign is always correct (DirAcc 1.0),
-    # the Hybrid's always wrong (0.0). The validation calibration must defer
-    # entirely to GARCH (w->1, follow) and the blend must recover ~1.0.
-    garch = true.copy()
-    hybrid = -true.copy()
-
-    r = regime_gated_blend(true, hybrid, garch, regimes,
-                           true, hybrid, garch, regimes)
-    for k in ("blended_diracc", "hybrid_diracc", "garch_diracc", "per_regime",
-              "per_regime_test_diracc", "regime_coverage", "blended_mae"):
-        assert k in r, f"missing key {k}"
-    assert r["garch_diracc"] == 1.0 and r["hybrid_diracc"] == 0.0
-    # The blend recovers the perfect model's accuracy (via w->1/follow OR the
-    # equivalent w->0/fade -- both invert to the correct sign here).
-    assert r["blended_diracc"] >= 0.99, r["blended_diracc"]
-    # Weights are valid convex coefficients with a valid mode.
-    for v in r["per_regime"].values():
-        assert 0.0 <= v["w"] <= 1.0 and v["mode"] in ("follow", "fade")
-
-    # label_regimes_fixed uses a reference threshold -> comparable across splits.
-    vol = np.abs(rng.standard_normal(500))
-    lab = label_regimes_fixed(vol, list(range(200)), vol[:400], 0.7)
-    assert lab.shape == (200,) and set(np.unique(lab)) <= {0, 1}
-    print("[PASS] regime-gated GARCH<->Hybrid blend (schema + defers to dominant model)")
-
-
 def test_price_reconstruction():
     panel = build_fx_panel(pair="XAU/USD", n_days=400, seed=1, source="synthetic")
     _, _, test_ds = time_split(panel)
@@ -724,7 +687,6 @@ if __name__ == "__main__":
         test_hybrid_residual_anchor_and_signal_conditioning,
         test_train_loop_with_xgb_augmented_dataset,
         test_random_walk_baseline,
-        test_regime_gated_blend,
         test_price_reconstruction,
         test_combined_loss,
         test_directional_bce_loss,
