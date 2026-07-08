@@ -175,25 +175,48 @@ def derive_trading_signals(
     )
 
 
+def score_headlines(df: "pd.DataFrame", scorer: FinBERTSentimentScorer) -> "pd.DataFrame":
+    """Add/refresh per-headline FinBERT ('polarity', 'confidence') columns,
+    scoring ONLY rows that don't already have a score. This is what makes
+    the sentiment cache work: once a historical headline is scored and
+    persisted in the news archive, it is never re-scored on later runs.
+    `df` must have 'title' (and optionally 'summary')."""
+    df = df.copy()
+    if "polarity" not in df.columns:
+        df["polarity"] = np.nan
+        df["confidence"] = np.nan
+    unscored = df["polarity"].isna()
+    if unscored.any():
+        texts = (df.loc[unscored, "title"].fillna("") + ". "
+                 + df.loc[unscored, "summary"].fillna("")).tolist()
+        scored = scorer.score_batch(texts)
+        df.loc[unscored, "polarity"] = [p for p, _ in scored]
+        df.loc[unscored, "confidence"] = [c for _, c in scored]
+        df.loc[unscored, "scorer_backend"] = scorer.backend
+    return df
+
+
 def build_sentiment_features(news_df: pd.DataFrame, scorer: FinBERTSentimentScorer) -> pd.DataFrame:
-    """Convert a per-bar headline table into the 12 sentiment features used
-    by the fusion layer: 8 rolling statistics (mean, std, min, max, count,
-    decayed mean, day-over-day momentum, rolling volatility) plus the 4
-    one-hot buy/sell/hold/none trading-signal columns from
-    `derive_trading_signals`.
+    """Convert a per-bar table into the 12 sentiment features (8 rolling
+    statistics + 4 one-hot buy/sell/hold/none signal columns).
 
-    `news_df` must have a 'text' column (concatenated headline text for
-    that bar/day — real headlines from FXStreet or a synthetic template,
-    it makes no difference here) and a 'headline_count' column. This is
-    the same schema whether the caller is `data/synthetic_data.py` or
-    `data/real_data_feed.py`.
+    Two input schemas are accepted:
+      * PRE-SCORED (preferred): a 'daily_score' column (already the per-bar
+        mean of polarity*confidence over that bar's headlines, from cached
+        per-headline scores) plus 'headline_count'. No FinBERT is run --
+        this is the score-cache fast path.
+      * RAW: a 'text' column of concatenated headline text plus
+        'headline_count'; scored here with FinBERT (synthetic path / tests).
     """
-    texts = news_df["text"].fillna("").tolist()
-    scored = scorer.score_batch(texts)
-    polarity = np.array([p for p, _ in scored])
-    confidence = np.array([c for _, c in scored])
-
-    daily_score = pd.Series(polarity * confidence, index=news_df.index)
+    if "daily_score" in news_df.columns:
+        daily_score = news_df["daily_score"].astype(float)
+    else:
+        texts = news_df["text"].fillna("").tolist()
+        scored = scorer.score_batch(texts)
+        polarity = np.array([p for p, _ in scored])
+        confidence = np.array([c for _, c in scored])
+        daily_score = pd.Series(polarity * confidence, index=news_df.index)
+    daily_score = pd.Series(daily_score.values, index=news_df.index)
     counts = news_df["headline_count"].clip(lower=1)
 
     roll_mean = daily_score.rolling(5, min_periods=1).mean()

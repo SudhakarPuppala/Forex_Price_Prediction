@@ -215,6 +215,33 @@ if __name__ == "__main__":
     parser.add_argument("--signal_strength", type=float, default=None)
     args = parser.parse_args()
 
+    # PIPELINE 2 gate: the model pipeline only runs when real data is ready.
+    # With --source panel (default), require a feature panel built by
+    # PIPELINE 1 (build_dataset.py) -- refuse to waste compute on missing
+    # or sparse-sentiment data.
+    if args.source == "panel":
+        import os
+        import sys
+
+        panel_path = "exports/feature_panel.csv"
+        if not os.path.exists(panel_path):
+            sys.exit(f"[gate] No feature panel at {panel_path}. Run PIPELINE 1 first:\n"
+                     f"       python build_dataset.py\n"
+                     f"       (inspect the verification report + exports/*.csv, THEN re-run this.)")
+        # Warn (do not block) if test-set sentiment coverage looks thin.
+        try:
+            import pandas as pd
+            dfp = pd.read_csv(panel_path)
+            if "sig_none" in dfp.columns:
+                test = dfp.iloc[int(len(dfp) * 0.85):]
+                cov = (test["sig_none"] == 0).mean()
+                print(f"[gate] feature panel OK: {len(dfp)} bars, test-set sentiment coverage {cov*100:.1f}%")
+                if cov < 0.30:
+                    print(f"[gate] WARNING: test-set sentiment coverage is low ({cov*100:.1f}%). "
+                          f"Deepen news first:  python build_news_archive.py && python build_dataset.py")
+        except Exception:
+            pass
+
     multi_seed_evaluation(
         args.seeds,
         pair=args.pair,

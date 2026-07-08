@@ -56,7 +56,10 @@ def _get_scorer() -> FinBERTSentimentScorer:
 def _assemble_panel(ohlc: pd.DataFrame, macro: pd.DataFrame, news: pd.DataFrame, source: str) -> FXPanel:
     tech = compute_technical_features(ohlc)
     scorer = _get_scorer()
-    cache_key = (len(news), hash(tuple(news["text"].fillna("").tolist())))
+    # Cache on whichever per-bar signal column is present: 'daily_score'
+    # for the pre-scored real path, 'text' for the synthetic/raw path.
+    key_col = "daily_score" if "daily_score" in news.columns else "text"
+    cache_key = (len(news), hash(tuple(news[key_col].fillna(0.0 if key_col == "daily_score" else "").tolist())))
     if cache_key in _SENTIMENT_FEATURE_CACHE:
         sentiment = _SENTIMENT_FEATURE_CACHE[cache_key]
     else:
@@ -109,14 +112,11 @@ def _export_intermediates(real: dict, exports_dir: str = "exports") -> None:
 
         news = real.get("news_raw")
         if news is not None and not news.empty:
-            scorer = FinBERTSentimentScorer()
-            texts = (news["title"].fillna("") + ". " + news["summary"].fillna("")).tolist()
-            scored = scorer.score_batch(texts)
-            out = news.copy()
-            out["polarity"] = [p for p, _ in scored]
-            out["confidence"] = [c for _, c in scored]
-            out["scorer_backend"] = scorer.backend
-            out.to_csv(os.path.join(exports_dir, "news_headlines_scored.csv"), index=False)
+            # news_raw is the scored archive -- polarity/confidence are
+            # already cached, so we just write them (no re-scoring).
+            cols = [c for c in ["timestamp", "title", "summary", "link",
+                                "polarity", "confidence", "scorer_backend"] if c in news.columns]
+            news[cols].to_csv(os.path.join(exports_dir, "news_headlines_scored.csv"), index=False)
 
         if real.get("macro") is not None:
             real["macro"].to_csv(os.path.join(exports_dir, "macro_fred.csv"))

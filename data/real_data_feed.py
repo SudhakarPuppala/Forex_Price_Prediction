@@ -295,37 +295,69 @@ def fetch_gdelt_news(
     return df
 
 
-def _grow_news_archive(fresh: pd.DataFrame, ticker: str, exports_dir: str = "exports") -> pd.DataFrame:
-    """Merge a freshly-fetched (partial) headline set into a persistent
-    per-ticker news archive on disk, de-duplicated on title, and return the
-    FULL accumulated archive. Each run's rate-limited fetch fills more of
-    the month-sized coverage holes, so sentiment coverage of the test
-    window grows monotonically across runs. Never raises."""
+def news_archive_path(ticker: str, exports_dir: str = "exports") -> str:
     import os
 
+    safe = ticker.replace("=", "").replace("^", "").replace("-", "").replace(".", "")
+    return os.path.join(exports_dir, "archive", f"news_{safe}.csv")
+
+
+def news_archive_max_date(ticker: str, exports_dir: str = "exports"):
+    """Latest headline timestamp already in the archive (None if empty).
+    The incremental fetch starts from here, so historical news is never
+    re-pulled."""
+    import os
+
+    path = news_archive_path(ticker, exports_dir)
+    if not os.path.exists(path):
+        return None
     try:
-        safe = ticker.replace("=", "").replace("^", "").replace("-", "").replace(".", "")
+        d = pd.read_csv(path, usecols=["timestamp"], parse_dates=["timestamp"])
+        return d["timestamp"].max() if len(d) else None
+    except Exception:
+        return None
+
+
+def _grow_news_archive(fresh: pd.DataFrame, ticker: str, exports_dir: str = "exports") -> pd.DataFrame:
+    """Merge freshly-fetched headlines into the persistent per-ticker
+    archive, SCORE only the newly-added headlines with FinBERT (cached
+    scores for everything already there), persist, and return the FULL
+    scored archive. This is the sentiment cache: historical headlines are
+    scored exactly once, ever. Never raises."""
+    import os
+
+    from data.sentiment import FinBERTSentimentScorer, score_headlines
+
+    try:
         arch_dir = os.path.join(exports_dir, "archive")
         os.makedirs(arch_dir, exist_ok=True)
-        path = os.path.join(arch_dir, f"news_{safe}.csv")
+        path = news_archive_path(ticker, exports_dir)
 
         frames = []
         if os.path.exists(path):
-            old = pd.read_csv(path, parse_dates=["timestamp"])
-            frames.append(old)
+            frames.append(pd.read_csv(path, parse_dates=["timestamp"]))
         if fresh is not None and not fresh.empty:
             frames.append(fresh)
         if not frames:
             return fresh if fresh is not None else pd.DataFrame()
 
         merged = pd.concat(frames, ignore_index=True)
+        if "summary" not in merged.columns:
+            merged["summary"] = ""
         merged = merged.dropna(subset=["title"]).drop_duplicates(subset=["title"])
         merged = merged.sort_values("timestamp").reset_index(drop=True)
+
+        # Score-cache: only rows without a polarity are scored (the new
+        # ones); the FinBERT model isn't even loaded if everything is cached.
+        n_unscored = int(merged["polarity"].isna().sum()) if "polarity" in merged.columns else len(merged)
+        if n_unscored > 0:
+            merged = score_headlines(merged, FinBERTSentimentScorer())
         merged.to_csv(path, index=False)
+
         n_months = merged["timestamp"].dt.to_period("M").nunique() if len(merged) else 0
-        print(f"[real_data_feed] news archive: {len(merged)} headlines over {n_months} months "
+        print(f"[real_data_feed] news archive: {len(merged)} scored headlines over {n_months} months "
               f"({merged['timestamp'].min().date()} -> {merged['timestamp'].max().date()}) "
-              f"[+{0 if fresh is None else len(fresh)} this run]")
+              f"[+{0 if fresh is None else len(fresh)} new, {n_unscored} newly scored]")
         return merged
     except Exception as e:
         warnings.warn(f"news archive merge failed (non-fatal): {type(e).__name__}: {e}")
@@ -623,6 +655,35 @@ def align_news_to_bars(bar_index: pd.DatetimeIndex, news_df: pd.DataFrame, windo
     return pd.DataFrame({"text": out_text, "headline_count": out_count}, index=bar_index)
 
 
+def align_scored_news_to_bars(bar_index: pd.DatetimeIndex, scored_news: pd.DataFrame,
+                              window_hours: float = 6.0) -> pd.DataFrame:
+    """Aggregate PRE-SCORED headlines onto bars using the cached per-headline
+    FinBERT scores -- no re-scoring. For each bar, average polarity*confidence
+    over the headlines in the trailing `window_hours` (no look-ahead) into a
+    'daily_score', and count them. Returns a per-bar frame with
+    ['daily_score', 'headline_count'] aligned 1:1 with `bar_index`, the
+    pre-scored schema build_sentiment_features consumes on its fast path."""
+    if scored_news is None or scored_news.empty or "polarity" not in scored_news.columns:
+        return pd.DataFrame({"daily_score": [0.0] * len(bar_index),
+                             "headline_count": [0] * len(bar_index)}, index=bar_index)
+
+    ns = scored_news.sort_values("timestamp")
+    times = ns["timestamp"].values.astype("datetime64[ns]")
+    signed = (ns["polarity"].fillna(0.0) * ns["confidence"].fillna(0.0)).values
+    window = np.timedelta64(int(window_hours * 3600), "s")
+    bar_times = bar_index.values.astype("datetime64[ns]")
+
+    out_score, out_count = [], []
+    for t in bar_times:
+        lo = np.searchsorted(times, t - window, side="left")
+        hi = np.searchsorted(times, t, side="right")
+        chunk = signed[lo:hi]
+        out_count.append(len(chunk))
+        out_score.append(float(chunk.mean()) if len(chunk) else 0.0)
+
+    return pd.DataFrame({"daily_score": out_score, "headline_count": out_count}, index=bar_index)
+
+
 # ---------------------------------------------------------------------------
 # Public entry point used by data/dataset.py
 # ---------------------------------------------------------------------------
@@ -656,28 +717,28 @@ def try_fetch_real_panel(ticker_symbol: str = "GC=F", interval: str = "5m", coun
         # published, so sparse coverage still populates most bars -- no
         # look-ahead (only news strictly before the bar is used).
         align_hours = 120.0
-    # PREFER the offline archive. GDELT's free tier rate-limits any single
-    # live run into month-sized coverage holes, so the dense history is
-    # built ONCE by build_news_archive.py (patient, resumable) into
-    # exports/archive/news_<ticker>.csv. Here we (a) load that archive if
-    # present, (b) do only a LIGHT live top-up of the most recent ~30 days
-    # for freshness (not a full 5-year fetch), and (c) align the union to
-    # bars. If no archive exists yet, fall back to a full live fetch.
-    import os as _os
-
-    safe = ticker_symbol.replace("=", "").replace("^", "").replace("-", "").replace(".", "")
-    archive_path = _os.path.join("exports", "archive", f"news_{safe}.csv")
-    if _os.path.exists(archive_path):
-        print(f"[real_data_feed] using offline news archive {archive_path} "
-              "(+ light recent top-up); run build_news_archive.py to deepen it.")
-        top_up = fetch_all_news(gdelt_days=30, gdelt_window_days=15)
-        news = _grow_news_archive(top_up, ticker_symbol)  # merges top-up INTO the archive, returns full
+    # PREFER the offline archive, and fetch only INCREMENTALLY. The dense
+    # history is built once by build_news_archive.py; here we top up ONLY
+    # the gap between the archive's latest headline and today (never
+    # re-pulling or re-scoring historical news), merge+score just the new
+    # items, and align the full SCORED archive to bars. If no archive
+    # exists yet, do a one-time full live fetch.
+    archive_path = news_archive_path(ticker_symbol)
+    last_date = news_archive_max_date(ticker_symbol)
+    if last_date is not None:
+        gap_days = max(1, (pd.Timestamp.utcnow().tz_localize(None) - last_date).days + 1)
+        print(f"[real_data_feed] news archive present (latest {last_date.date()}); "
+              f"incremental top-up of the last {gap_days} day(s) only.")
+        top_up = fetch_all_news(gdelt_days=min(gap_days, gdelt_days),
+                                gdelt_window_days=min(gdelt_window, max(2, gap_days)))
+        news = _grow_news_archive(top_up, ticker_symbol)  # merges+scores new, returns full scored archive
     else:
-        print("[real_data_feed] no news archive found -- doing a full live fetch "
+        print("[real_data_feed] no news archive found -- one-time full live fetch "
               "(slow, rate-limited; build_news_archive.py is the reliable path).")
         fresh = fetch_all_news(gdelt_days=gdelt_days, gdelt_window_days=gdelt_window)
         news = _grow_news_archive(fresh, ticker_symbol)
-    news_aligned = align_news_to_bars(ohlc.index, news, window_hours=align_hours)
+    # Align using CACHED per-headline scores (no re-scoring).
+    news_aligned = align_scored_news_to_bars(ohlc.index, news, window_hours=align_hours)
 
     # Real macro stream (Yahoo rates/DXY + BLS CPI); None -> synthetic fallback.
     macro = fetch_real_macro(ohlc.index)

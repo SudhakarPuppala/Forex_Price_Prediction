@@ -121,6 +121,11 @@ def main():
         archive = archive.dropna(subset=["title"]).drop_duplicates(subset=["title"]).sort_values("timestamp").reset_index(drop=True)
         # Keep only gold-relevant headlines in the archive.
         archive = filter_relevant_news(archive) if len(archive) else archive
+        # Score-cache: FinBERT-score only the newly-added headlines and
+        # persist, so the model pipeline never re-scores historical news.
+        from data.sentiment import FinBERTSentimentScorer, score_headlines
+        if "polarity" not in archive.columns or archive["polarity"].isna().any():
+            archive = score_headlines(archive, FinBERTSentimentScorer())
         archive.to_csv(path, index=False)  # incremental save
         fetched_total += len(new)
         months = archive.timestamp.dt.to_period("M").nunique()
