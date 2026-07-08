@@ -140,29 +140,50 @@ N_SIGNAL_CLASSES = len(SIGNAL_NAMES)
 def derive_trading_signals(
     daily_score: pd.Series,
     headline_count: pd.Series,
-    buy_threshold: float = 0.2,
-    sell_threshold: float = -0.2,
+    z_threshold: float = 0.5,
+    min_periods: int = 20,
 ) -> pd.DataFrame:
     """Discretise the news-sentiment stream into a per-bar trading signal
     -- buy / sell / hold / none -- and return it one-hot encoded.
 
-    The signal is taken from the exponentially-decayed sentiment score
-    (halflife 3 bars) rather than the raw per-bar score, so a single noisy
-    headline can't flip the signal; sustained positive coverage is needed
-    to reach 'buy' and sustained negative coverage to reach 'sell'.
+    A FIXED absolute threshold does not work here: even after neutral-excluded
+    aggregation the smoothed score sits close to zero, so a hard +/-0.2 cut
+    (the previous rule) left sig_buy / sig_sell permanently at 0. Instead the
+    signal is ADAPTIVE, mirroring how industry sentiment indices (RavenPack,
+    LSEG MarketPsych) are read -- relative to their own recent distribution:
 
-        buy   decayed score >  buy_threshold  (sustained bullish coverage)
-        sell  decayed score <  sell_threshold (sustained bearish coverage)
-        hold  headlines exist but sentiment is inside the neutral band
-        none  no headlines published for this bar at all -- distinct from
-              'hold', because "the news is neutral" and "there is no news"
-              carry different information (quiet tape vs. mixed tape)
-    """
+      1. smooth the score (EWMA halflife 3) so one noisy headline can't flip it,
+      2. standardise it with an EXPANDING (causal, no look-ahead) mean/std taken
+         over NEWS-BEARING bars only, giving a regime-relative z-score,
+      3. buy  when z > +z_threshold AND the smoothed score is positive,
+         sell when z < -z_threshold AND the smoothed score is negative,
+         hold when news exists but the signal is inside the band,
+         none when no headline was published for the bar (quiet tape --
+         distinct from a mixed/neutral tape, so kept as its own class).
+
+    The sign guard keeps a merely below-average-but-still-positive bar from
+    being labelled 'sell' (and vice-versa)."""
     smoothed = daily_score.ewm(halflife=3).mean()
     none = headline_count <= 0
-    buy = (smoothed > buy_threshold) & ~none
-    sell = (smoothed < sell_threshold) & ~none
-    hold = ~(buy | sell | none)
+    news = ~none
+
+    # Regime-relative standardisation over news bars only (expanding = causal).
+    # Before `min_periods` news bars have accrued the expanding stats are
+    # undefined, so fall back to a zero-centred mean and the global news-bar
+    # std -- this keeps the rule working on short series (and early history)
+    # instead of silently never firing.
+    news_score = smoothed.where(news)
+    glob_sd = float(smoothed[news].std()) if int(news.sum()) > 1 else 1.0
+    if not np.isfinite(glob_sd) or glob_sd <= 0:
+        glob_sd = 1.0
+    mu = news_score.expanding(min_periods=min_periods).mean().ffill().fillna(0.0)
+    sd = news_score.expanding(min_periods=min_periods).std().ffill().fillna(glob_sd)
+    sd = sd.replace(0.0, glob_sd) + 1e-9
+    z = (smoothed - mu) / sd
+
+    buy = news & (z > z_threshold) & (smoothed > 0)
+    sell = news & (z < -z_threshold) & (smoothed < 0)
+    hold = news & ~(buy | sell)
 
     return pd.DataFrame(
         {

@@ -671,21 +671,35 @@ def align_news_to_bars(bar_index: pd.DatetimeIndex, news_df: pd.DataFrame, windo
     return pd.DataFrame({"text": out_text, "headline_count": out_count}, index=bar_index)
 
 
+# A headline counts as directional (bullish/bearish) only if its FinBERT
+# polarity clears this band; below it the headline is treated as neutral and
+# excluded from the sentiment mean. This is the key de-dilution step -- plain
+# averaging over the ~40% neutral gold headlines collapses the daily score
+# toward zero (industry sentiment indices aggregate the DIRECTIONAL signal,
+# not the neutral majority).
+_NEUTRAL_BAND = 0.15
+
+
 def align_scored_news_to_bars(bar_index: pd.DatetimeIndex, scored_news: pd.DataFrame,
                               window_hours: float = 6.0) -> pd.DataFrame:
     """Aggregate PRE-SCORED headlines onto bars using the cached per-headline
-    FinBERT scores -- no re-scoring. For each bar, average polarity*confidence
-    over the headlines in the trailing `window_hours` (no look-ahead) into a
-    'daily_score', and count them. Returns a per-bar frame with
-    ['daily_score', 'headline_count'] aligned 1:1 with `bar_index`, the
-    pre-scored schema build_sentiment_features consumes on its fast path."""
+    FinBERT scores -- no re-scoring. For each bar, compute a
+    confidence-weighted mean of polarity over the DIRECTIONAL headlines
+    (|polarity| >= neutral band) in the trailing `window_hours` (no
+    look-ahead), plus the headline count. Neutral-excluded aggregation keeps
+    the signal from being diluted to ~0 by the neutral majority. Returns a
+    per-bar frame with ['daily_score', 'headline_count'] aligned 1:1 with
+    `bar_index`, the schema build_sentiment_features consumes on its fast path."""
     if scored_news is None or scored_news.empty or "polarity" not in scored_news.columns:
         return pd.DataFrame({"daily_score": [0.0] * len(bar_index),
                              "headline_count": [0] * len(bar_index)}, index=bar_index)
 
     ns = scored_news.sort_values("timestamp")
     times = ns["timestamp"].values.astype("datetime64[ns]")
-    signed = (ns["polarity"].fillna(0.0) * ns["confidence"].fillna(0.0)).values
+    pol = ns["polarity"].fillna(0.0).values
+    conf = ns["confidence"].fillna(0.0).values
+    signed = pol * conf
+    directional = np.abs(pol) >= _NEUTRAL_BAND
     window = np.timedelta64(int(window_hours * 3600), "s")
     bar_times = bar_index.values.astype("datetime64[ns]")
 
@@ -693,9 +707,12 @@ def align_scored_news_to_bars(bar_index: pd.DatetimeIndex, scored_news: pd.DataF
     for t in bar_times:
         lo = np.searchsorted(times, t - window, side="left")
         hi = np.searchsorted(times, t, side="right")
-        chunk = signed[lo:hi]
-        out_count.append(len(chunk))
-        out_score.append(float(chunk.mean()) if len(chunk) else 0.0)
+        out_count.append(hi - lo)                     # all headlines feed the count
+        dmask = directional[lo:hi]
+        if dmask.any():
+            out_score.append(float(signed[lo:hi][dmask].mean()))
+        else:
+            out_score.append(0.0)                     # no directional news -> neutral
 
     return pd.DataFrame({"daily_score": out_score, "headline_count": out_count}, index=bar_index)
 
