@@ -53,11 +53,12 @@ def load_model_and_xgb():
     """Returns (hybrid, xgb, test_x) or None if no checkpoint exists yet."""
     if not os.path.exists(os.path.join(CKPT, "hybrid.pt")):
         return None
+    import joblib
     from baselines.xgboost_baseline import XGBoostForexModel, XGBAugmentedDataset
     from models.hybrid_model import HybridCNNLSTMTransformer
     panel, train_ds, val_ds, test_ds = load_panel_and_splits()
     xgb = XGBoostForexModel()
-    xgb.model.load_model(os.path.join(CKPT, "xgb.json"))
+    xgb.model = joblib.load(os.path.join(CKPT, "xgb.pkl"))  # fitted MultiOutputRegressor
     test_x = XGBAugmentedDataset(test_ds, xgb)
     hybrid = HybridCNNLSTMTransformer()
     hybrid.load_state_dict(torch.load(os.path.join(CKPT, "hybrid.pt"), map_location="cpu"))

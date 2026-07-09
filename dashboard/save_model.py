@@ -62,8 +62,9 @@ def main():
     print("[save_model] evaluating on test set ...")
     report, y_true, y_pred, band = evaluate_deep_model(hybrid, test_x, "Hybrid", device="cpu")
 
+    import joblib
     torch.save(hybrid.state_dict(), os.path.join(OUTDIR, "hybrid.pt"))
-    xgb.model.save_model(os.path.join(OUTDIR, "xgb.json"))
+    joblib.dump(xgb.model, os.path.join(OUTDIR, "xgb.pkl"))  # MultiOutputRegressor
     meta = {
         "seed": SEED,
         "saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
