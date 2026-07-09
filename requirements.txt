@@ -8,6 +8,8 @@ matplotlib>=3.8      # human-readable chart/report generation
 yfinance>=0.2         # real XAU/USD candle feed (data/real_data_feed.py)
 feedparser>=6.0       # real FXStreet news feed (data/real_data_feed.py)
 requests>=2.28        # browser-header HTTP fetch for news feed (avoids bot-protection 403s)
+streamlit>=1.40       # interactive project dashboard (dashboard/app.py)
+plotly>=5.20          # interactive charts in the dashboard
 
 # Optional, for production use (not required for the default synthetic pipeline):
 # transformers>=4.30      # enables real FinBERT sentiment scoring (falls back to a lexicon scorer if absent)

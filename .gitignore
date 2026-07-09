@@ -13,3 +13,4 @@ __pycache__/
 
 # Benchmark reports under report/ are tracked deliberately: they are the
 # recorded evidence for each evaluation round.
+dashboard/__pycache__/
