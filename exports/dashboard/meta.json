@@ -1,6 +1,6 @@
 {
   "seed": 9,
-  "saved_at": "2026-07-10T00:45:24",
+  "saved_at": "2026-07-14T01:33:40",
   "feature_names": [
     "ret_open",
     "ret_high",
@@ -14,6 +14,10 @@
     "roc_10",
     "stoch_k",
     "ema_ratio",
+    "drift_5",
+    "drift_21",
+    "drift_60",
+    "drift_tstat",
     "rate_z21",
     "yield_chg5",
     "dollar_ret5",
@@ -34,24 +38,24 @@
     "sig_hold",
     "sig_none"
   ],
-  "n_technical": 12,
+  "n_technical": 16,
   "n_macro": 6,
   "n_sentiment": 13,
-  "n_total": 31,
+  "n_total": 35,
   "lookback": 60,
   "horizon": 10,
-  "n_params": 4386261,
+  "n_params": 4386517,
   "split": {
-    "train": 4480,
+    "train": 4482,
     "val": 972,
     "test": 963
   },
   "test_metrics": {
-    "DirectionalAccuracy": 0.5337487019730011,
-    "MAE": 0.022127116098999977,
-    "RMSE": 0.03037516213953495
+    "DirectionalAccuracy": 0.5345794392523364,
+    "MAE": 0.02165042795240879,
+    "RMSE": 0.02973894216120243
   },
-  "panel_bars": 6487,
+  "panel_bars": 6489,
   "date_start": "2000-08-30 00:00:00-04:00",
-  "date_end": "2026-07-09 00:00:00-04:00"
+  "date_end": "2026-07-13 00:00:00-04:00"
 }
