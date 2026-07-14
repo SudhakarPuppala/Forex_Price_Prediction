@@ -786,10 +786,31 @@ elif page.startswith("🔮"):
                                yaxis=dict(autorange="reversed"), xaxis_title="relative impact (%)")
             st.plotly_chart(tfig, use_container_width=True)
             st.caption("Top individual **technical / macro / sentiment** features for this specific prediction.")
-        st.info(f"For this window, **technical/price features drive ~{grp_pct['Technical / FX']:.0f}%** of the "
-                f"forecast, macro ~{grp_pct['Macro']:.0f}%, and news sentiment ~{grp_pct['News sentiment']:.0f}% — "
-                f"consistent with the honest finding that sentiment is a weak directional driver at ~18% news "
-                f"coverage.", icon="🔎")
+        # Deep-path-only sentiment impact: the chart above measures the FULL
+        # model, where the learned trust gate routes most weight to the
+        # XGBoost expert (whose trees ignore the sentiment columns). Inside
+        # the deep pathway -- the only path that reads text -- sentiment DOES
+        # move the representation; measure it by zeroing the text tower and
+        # comparing the DEEP forecast.
+        try:
+            with torch.no_grad():
+                d_full = hybrid(xq_t, xt_t, rc_t, xgp_t)["deep_forecast"][0].numpy()
+                d_none = hybrid(xq_t, torch.zeros_like(xt_t), rc_t, xgp_t)["deep_forecast"][0].numpy()
+                trust = float(hybrid(xq_t, xt_t, rc_t, xgp_t)["xgb_trust"][0].mean())
+            deep_sent_pct = 100 * np.abs(d_full - d_none).mean() / (np.abs(d_full).mean() + 1e-12)
+            st.info(
+                f"For this window, **technical/price features drive ~{grp_pct['Technical / FX']:.0f}%** of the "
+                f"final forecast, macro ~{grp_pct['Macro']:.0f}%, news sentiment ~{grp_pct['News sentiment']:.0f}%.\n\n"
+                f"**Why sentiment shows ≈0% here — the model does read it:** inside the deep pathway (the only "
+                f"path that sees text), zeroing the news changes the deep forecast by **{deep_sent_pct:.0f}%**. "
+                f"But the learned regime trust gate then allocates **{trust*100:.0f}%** of the final blend to the "
+                f"XGBoost expert, whose trees assign the sentiment columns ~0 importance — so sentiment's "
+                f"end-to-end influence is diluted to ≈{(1-trust)*deep_sent_pct:.0f}%. This is a *learned* "
+                f"allocation, consistent with the coverage-falsification experiment: even at 100% news coverage, "
+                f"headline sentiment adds no measurable directional accuracy on daily gold.", icon="🔎")
+        except Exception:
+            st.info(f"Technical ~{grp_pct['Technical / FX']:.0f}%, macro ~{grp_pct['Macro']:.0f}%, "
+                    f"sentiment ~{grp_pct['News sentiment']:.0f}%.", icon="🔎")
 
         # 3. training techniques, with THIS prediction's live values
         st.markdown("##### 3 · How the training techniques shaped THIS forecast (live values)")

@@ -74,10 +74,15 @@ class XGBAugmentedDataset:
     weigh it -- not a single global scalar blend fitted after the fact.
     """
 
-    def __init__(self, base_dataset, xgb_model: "XGBoostForexModel"):
+    def __init__(self, base_dataset, xgb_model: "XGBoostForexModel", preds: np.ndarray = None):
         self.base_dataset = base_dataset
-        X, _ = build_xgb_feature_matrix(base_dataset)
-        self.xgb_preds = xgb_model.model.predict(X).astype("float32")  # (N, horizon), precomputed once
+        if preds is not None:
+            # Caller-supplied predictions (e.g. the WALK-FORWARD refit expert,
+            # see walk_forward_expert_preds) instead of the static train-fit model.
+            self.xgb_preds = np.asarray(preds, dtype="float32")
+        else:
+            X, _ = build_xgb_feature_matrix(base_dataset)
+            self.xgb_preds = xgb_model.model.predict(X).astype("float32")  # (N, horizon), precomputed once
         assert len(self.xgb_preds) == len(base_dataset)
 
     def __len__(self):
@@ -143,3 +148,66 @@ class XGBoostForexModel:
         summaries = np.array([summarize_window(x) for x in x_seq])
         X = np.concatenate([summaries, regime_ctx], axis=1)
         return self.model.predict(X)
+
+
+def walk_forward_expert_preds(train_ds, val_ds, test_ds, refit_every: int = 42,
+                              horizon: int = 10, verbose: bool = True) -> np.ndarray:
+    """WALK-FORWARD refit of the XGBoost expert over the test span.
+
+    The classical baselines (ARIMA/GARCH) are refit at every test origin, so
+    they ADAPT through the 4-year test period, while the static expert is
+    frozen at the train boundary -- the diagnostic showed this adaptivity gap
+    (not the drift statistic itself) is the bulk of GARCH's directional edge.
+    This function closes it honestly for the Hybrid's tabular expert: every
+    `refit_every` test windows a fresh MultiOutputRegressor is fit on ALL
+    windows whose forecast horizon lies STRICTLY in the past (train + val +
+    already-elapsed test windows with fully realised targets: origin <=
+    refit_origin - horizon - 1), then predicts the next block. No look-ahead:
+    each block's model has seen nothing at or after its first origin.
+
+    Returns (n_test, horizon) predictions aligned to test_ds order.
+    """
+    # The refits are deterministic (random_state=42) and independent of the
+    # neural seed, so a multi-seed run computes them once and reuses them.
+    import hashlib
+    key = (hashlib.md5(np.asarray(test_ds.panel.close).tobytes()).hexdigest(),
+           len(test_ds), refit_every)
+    cache = getattr(walk_forward_expert_preds, "_cache", {})
+    if key in cache:
+        if verbose:
+            print(f"[wf-expert] reusing cached walk-forward predictions ({len(test_ds)} windows)")
+        return cache[key]
+
+    X_tr, y_tr = build_xgb_feature_matrix(train_ds)
+    X_va, y_va = build_xgb_feature_matrix(val_ds)
+    X_te, y_te = build_xgb_feature_matrix(test_ds)
+    X_hist = np.concatenate([X_tr, X_va], axis=0)
+    y_hist = np.concatenate([y_tr, y_va], axis=0)
+    hist_idx = np.array(list(train_ds.indices) + list(val_ds.indices))
+    test_idx = np.array(list(test_ds.indices))
+    n_test = len(test_idx)
+
+    preds = np.zeros((n_test, horizon), dtype="float32")
+    n_blocks = int(np.ceil(n_test / refit_every))
+    for b in range(n_blocks):
+        lo = b * refit_every
+        hi = min(n_test, lo + refit_every)
+        refit_origin = test_idx[lo]
+        # realised-target cutoff: window at t has targets t+1..t+horizon
+        cutoff = refit_origin - horizon - 1
+        hist_mask = hist_idx <= cutoff                       # train/val windows
+        test_mask = test_idx <= cutoff                       # elapsed test windows
+        X_fit = np.concatenate([X_hist[hist_mask], X_te[test_mask]], axis=0)
+        y_fit = np.concatenate([y_hist[hist_mask], y_te[test_mask]], axis=0)
+        base = XGBRegressor(n_estimators=300, max_depth=4, learning_rate=0.03,
+                            subsample=0.8, colsample_bytree=0.8,
+                            objective="reg:squarederror", n_jobs=-1, random_state=42)
+        model = MultiOutputRegressor(base)
+        model.fit(X_fit, y_fit)
+        preds[lo:hi] = model.predict(X_te[lo:hi]).astype("float32")
+        if verbose:
+            print(f"[wf-expert] block {b+1}/{n_blocks}: refit on {len(X_fit)} windows "
+                  f"(cutoff idx {cutoff}), predicted {hi-lo}")
+    cache[key] = preds
+    walk_forward_expert_preds._cache = cache
+    return preds

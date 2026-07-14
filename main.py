@@ -198,7 +198,33 @@ def run(
         )
     else:
         hybrid, hist = train_model(hybrid, train_ds_xgb, val_ds_xgb, epochs=epochs, lr=TRAIN_CFG.lr * 0.5, device=device, classification_weight=classification_weight, seed=seed)
+    # --- ADAPTIVE expert at test time (walk-forward refits) -----------------
+    # ARIMA/GARCH are refit at every test origin, so they adapt through the
+    # 4-year test span while the static train-fit expert stays frozen at the
+    # 2022 boundary -- the diagnostic showed this adaptivity gap, not the
+    # drift statistic, is the bulk of GARCH's directional edge. For real runs
+    # the Hybrid's tabular expert is therefore refit walk-forward (every 42
+    # test windows, on strictly-past data only) and the Hybrid is evaluated
+    # with those adaptive expert inputs -- the like-for-like comparison with
+    # the walk-forward baselines. The static evaluation is printed alongside.
+    if source in ("real", "panel") and not quick:
+        from baselines.xgboost_baseline import walk_forward_expert_preds
+        rep_static, _, _, _ = evaluate_deep_model(hybrid, test_ds_xgb, "Hybrid_static", device=device)
+        print(f"[adaptive] static-expert Hybrid DirAcc: {rep_static['overall']['DirectionalAccuracy']:.4f} "
+              f"(expert frozen at the train boundary)")
+        wf_preds = walk_forward_expert_preds(train_ds, val_ds, test_ds, refit_every=42)
+        test_ds_xgb = XGBAugmentedDataset(test_ds, xgb, preds=wf_preds)
+        reports_key_note = "adaptive walk-forward expert"
+    else:
+        rep_static = None
+        reports_key_note = "static expert"
     reports["Hybrid_CNN_LSTM_Transformer"], y_true, y_pred, test_band = evaluate_deep_model(hybrid, test_ds_xgb, "Hybrid_CNN_LSTM_Transformer", device=device)
+    reports["Hybrid_CNN_LSTM_Transformer"]["expert_mode"] = reports_key_note
+    if rep_static is not None:
+        reports["Hybrid_CNN_LSTM_Transformer"]["static_expert_overall"] = rep_static["overall"]
+        print(f"[adaptive] walk-forward-expert Hybrid DirAcc: "
+              f"{reports['Hybrid_CNN_LSTM_Transformer']['overall']['DirectionalAccuracy']:.4f} "
+              f"(delta {reports['Hybrid_CNN_LSTM_Transformer']['overall']['DirectionalAccuracy'] - rep_static['overall']['DirectionalAccuracy']:+.4f})")
     record_price_predictions("Hybrid_CNN_LSTM_Transformer", y_true, y_pred)
     export_predictions_csv("Hybrid_CNN_LSTM_Transformer", y_true, y_pred)
     reports["Hybrid_CNN_LSTM_Transformer"]["event_window"] = event_window_metrics(y_true, y_pred)
