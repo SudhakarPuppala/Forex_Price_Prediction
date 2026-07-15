@@ -872,11 +872,22 @@ def try_fetch_real_panel(ticker_symbol: str = "GC=F", interval: str = "5m", coun
     # from the cached, already-scored archive. Set FOREX_OFFLINE_NEWS=1. This
     # is the fast path for re-aligning after a filter/align-window change --
     # no fetching, no re-scoring (honours "don't redo work").
-    if os.environ.get("FOREX_OFFLINE_NEWS") and last_date is not None and os.path.exists(archive_path):
-        print(f"[real_data_feed] OFFLINE mode: rebuilding from cached scored archive "
-              f"(latest {last_date.date()}, no GDELT fetch, no re-scoring).")
-        news = pd.read_csv(archive_path, parse_dates=["timestamp"])
-        news = filter_relevant_news(news) if len(news) else news
+    if os.environ.get("FOREX_OFFLINE_NEWS"):
+        if last_date is not None and os.path.exists(archive_path):
+            print(f"[real_data_feed] OFFLINE mode: rebuilding from cached scored archive "
+                  f"(latest {last_date.date()}, no GDELT fetch, no re-scoring).")
+            news = pd.read_csv(archive_path, parse_dates=["timestamp"])
+            news = filter_relevant_news(news) if len(news) else news
+        else:
+            # No archive for this ticker (e.g. SI=F / EURUSD=X in the
+            # cross-pair transfer experiment): skip news entirely rather than
+            # fall through to a slow live GDELT fetch. Every bar carries the
+            # explicit 'none' signal -- the state the model is trained for
+            # via modality masking.
+            print(f"[real_data_feed] OFFLINE mode: no news archive for {ticker_symbol} -- "
+                  f"building a news-less panel (all bars carry the 'none' signal).")
+            news = pd.DataFrame(columns=["timestamp", "title", "summary", "link",
+                                         "polarity", "confidence"])
         news_aligned = align_scored_news_to_bars(ohlc.index, news, window_hours=align_hours)
         macro = fetch_real_macro(ohlc.index)
         return {

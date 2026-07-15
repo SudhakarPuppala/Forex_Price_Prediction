@@ -871,6 +871,28 @@ drift direction, and the drift-quality gate restricts trading to persistent-tren
 all-bars accuracy remains ~0.53 vs GARCH 0.577.</p>
 """)
 
+        # ---- cross-pair zero-shot transfer (roadmap item: add currency pairs) ----
+        if os.path.exists("exports/cross_pair_transfer.json"):
+            xp = json.load(open("exports/cross_pair_transfer.json"))
+            xp_rows = []
+            for pr, v in xp.get("pairs", {}).items():
+                xp_rows.append({
+                    "Pair": pr, "Bars": f"{v['bars']:,}", "Test windows": v["test_windows"],
+                    "Hybrid (zero-shot) DirAcc": round(v["hybrid_zero_shot"]["diracc"], 4),
+                    "WF-expert alone": round(v["wf_expert_alone_diracc"], 4),
+                    "Own GARCH DirAcc": round(v["garch"]["diracc"], 4),
+                })
+            if xp_rows:
+                S.append(f"""
+<p><b>Cross-pair zero-shot transfer.</b> The gold-trained Hybrid (frozen seed-9 weights,
+<i>no fine-tuning</i>) evaluated on other pairs built through the same pipeline — each
+pair uses its own train-split normalisation, its own walk-forward XGBoost expert
+(refit every 14 windows) and is compared against its own walk-forward
+AR(1)-GARCH(1,1). No news archive exists for these tickers, so every bar carries the
+explicit 'none' sentiment state (the condition modality masking trains for):</p>
+{df_to_html(pd.DataFrame(xp_rows), floatfmt="{:.4f}")}
+""")
+
         cons = rm.get("consensus")
         if cons:
             cb = cons["backtest"]
