@@ -34,24 +34,23 @@ import time
 import pandas as pd
 
 from data.real_data_feed import (
-    GOOGLE_NEWS_LANES,
     fetch_google_news_rss,
     filter_relevant_news,
+    news_archive_path,
 )
+from data.pairs import get_pair
 
-ARCHIVE = "exports/archive/news_GCF.csv"
-CKPT = "exports/archive/gnews_backfill_state.json"
 TEST_SPAN_START = "2022-08-01"   # walk-forward test span -> denser 10-day windows
 
 
-def load_archive() -> pd.DataFrame:
-    if os.path.exists(ARCHIVE):
-        return pd.read_csv(ARCHIVE, parse_dates=["timestamp"])
+def load_archive(archive_path: str) -> pd.DataFrame:
+    if os.path.exists(archive_path):
+        return pd.read_csv(archive_path, parse_dates=["timestamp"])
     return pd.DataFrame(columns=["timestamp", "title", "summary", "link"])
 
 
-def save_archive(df: pd.DataFrame):
-    df.to_csv(ARCHIVE, index=False)
+def save_archive(df: pd.DataFrame, archive_path: str):
+    df.to_csv(archive_path, index=False)
 
 
 def score_pending(archive: pd.DataFrame) -> pd.DataFrame:
@@ -84,34 +83,42 @@ def build_windows(start: str, test_start: str):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--pair", default="XAU/USD",
+                    help="XAU/USD (gold), XAG/USD (silver) or EUR/USD (euro)")
     ap.add_argument("--start", default="2018-01-01")
     ap.add_argument("--test-start", default=TEST_SPAN_START)
     ap.add_argument("--score-every", type=int, default=25,
                     help="run FinBERT over pending rows every N fetched windows")
     args = ap.parse_args()
 
-    state = json.load(open(CKPT)) if os.path.exists(CKPT) else {"done": []}
+    cfg = get_pair(args.pair)
+    lanes = cfg.gnews_lanes
+    archive_path = news_archive_path(cfg.ticker)
+    ckpt = os.path.join("exports", "archive", f"gnews_backfill_state_{cfg.slug}.json")
+    print(f"[gnews] pair={cfg.name} slug={cfg.slug} -> archive {archive_path}")
+
+    state = json.load(open(ckpt)) if os.path.exists(ckpt) else {"done": []}
     done = set(map(tuple, state["done"]))
 
-    archive = load_archive()
+    archive = load_archive(archive_path)
     print(f"[gnews] archive start: {len(archive)} headlines"
           + (f" ({archive.timestamp.min().date()} -> {archive.timestamp.max().date()})" if len(archive) else ""))
 
     windows = build_windows(args.start, args.test_start)
-    jobs = [(lane, w0, w1) for (w0, w1) in windows for lane in GOOGLE_NEWS_LANES]
+    jobs = [(lane, w0, w1) for (w0, w1) in windows for lane in lanes]
     todo = [(l, w0, w1) for (l, w0, w1) in jobs if (l, str(w0.date()), str(w1.date())) not in done]
     print(f"[gnews] plan: {len(jobs)} lane-windows total, {len(todo)} remaining")
 
     fetched_windows = 0
     added_total = 0
     for i, (lane, w0, w1) in enumerate(todo, 1):
-        df = fetch_google_news_rss(GOOGLE_NEWS_LANES[lane], start=w0, end=w1)
+        df = fetch_google_news_rss(lanes[lane], start=w0, end=w1)
         n_new = 0
         if not df.empty:
             merged = pd.concat([archive, df], ignore_index=True)
             merged["title"] = merged["title"].astype(str).str.strip()
             merged = merged.dropna(subset=["title"]).drop_duplicates(subset=["title"])
-            merged = filter_relevant_news(merged) if len(merged) else merged
+            merged = filter_relevant_news(merged, pair=cfg) if len(merged) else merged
             n_new = len(merged) - len(archive)
             archive = merged.sort_values("timestamp").reset_index(drop=True)
             added_total += max(0, n_new)
@@ -122,18 +129,18 @@ def main():
         # periodic checkpoint: save archive + state, score pending rows
         if fetched_windows % args.score_every == 0:
             archive = score_pending(archive)
-            save_archive(archive)
-            json.dump({"done": sorted(map(list, done))}, open(CKPT, "w"))
+            save_archive(archive, archive_path)
+            json.dump({"done": sorted(map(list, done))}, open(ckpt, "w"))
             print(f"[gnews] checkpoint: {len(archive)} headlines scored+saved")
         time.sleep(1.2 + random.random())            # polite pacing
 
     archive = score_pending(archive)
-    save_archive(archive)
-    json.dump({"done": sorted(map(list, done))}, open(CKPT, "w"))
+    save_archive(archive, archive_path)
+    json.dump({"done": sorted(map(list, done))}, open(ckpt, "w"))
     months = archive.timestamp.dt.to_period("M").nunique() if len(archive) else 0
-    print(f"\n[gnews] DONE: +{added_total} new headlines this run; archive now "
+    print(f"\n[gnews] DONE ({cfg.slug}): +{added_total} new headlines this run; archive now "
           f"{len(archive)} over {months} months "
-          f"({archive.timestamp.min().date()} -> {archive.timestamp.max().date()})")
+          + (f"({archive.timestamp.min().date()} -> {archive.timestamp.max().date()})" if len(archive) else ""))
 
 
 if __name__ == "__main__":

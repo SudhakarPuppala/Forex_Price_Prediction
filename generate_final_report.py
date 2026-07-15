@@ -610,6 +610,35 @@ own parts. ARIMA/GARCH are deterministic (no seed variance). The <b>seed-ensembl
 {df_to_html(comp, max_rows=10, floatfmt="{:.4f}")}
 """)
 
+        # ---- 6b. per-pair results (multi-currency) ----
+        if os.path.exists("exports/pair_metrics/all_pairs.json"):
+            allp = json.load(open("exports/pair_metrics/all_pairs.json"))
+            prows = []
+            for slug, m in allp.items():
+                a = m.get("arima") or {}
+                prows.append({
+                    "Currency pair": m["label"], "Test windows": m["split"]["test"],
+                    "Hybrid DirAcc": round(m["hybrid"]["DirAcc"], 4),
+                    "Hybrid MAE": round(m["hybrid"]["MAE"], 5),
+                    "Hybrid RMSE": round(m["hybrid"]["RMSE"], 5),
+                    "WF-expert DirAcc": round(m["wf_expert_diracc"], 4),
+                    "GARCH DirAcc": round(m["garch"]["DirAcc"], 4),
+                    "ARIMA DirAcc": round(a["DirAcc"], 4) if a else "—",
+                })
+            S.append(f"""
+<h3>6b. Per-currency results — gold, silver &amp; euro (separate pipelines)</h3>
+<p>Each pair is built and evaluated through its <b>own</b> pipeline: its own prices
+(yfinance / MT5-CSV when supplied), its own per-currency news feed and relevance
+filter, its own train-split normalisation, its own walk-forward XGBoost + GARCH experts,
+and its own AR(1)-GARCH / ARIMA baselines refit on that pair's data. Macro drivers and the
+FOMC/NFP calendar are shared (they move every dollar pair). Single-seed (seed 9) so the
+rows are directly comparable:</p>
+{df_to_html(pd.DataFrame(prows), floatfmt="{:.4f}")}
+<p class="small">Gold and silver (the precious-metal complex) are the model's strongest
+pairs; EUR/USD is a distinct asset class. Every pair keeps its raw extracts separate under
+<code>exports/pairs/&lt;slug&gt;/</code> so the analyses never overwrite one another.</p>
+""")
+
         # ---- 6a. ablation: sentiment diffusion feature ----
         # Same-seed A/B from git history (commits bf70097 vs 9d98746). The ONLY
         # change between those two runs is the addition of the sent_diffusion

@@ -48,32 +48,50 @@ def file_mtime(path):
 
 
 @st.cache_resource(show_spinner="Building feature panel + splits …")
-def load_panel_and_splits():
+def load_panel_and_splits(pair: str = "XAU/USD"):
     from data.dataset import build_fx_panel, time_split
-    panel = build_fx_panel(pair="XAU/USD", n_days=10000, seed=9,
-                           source="panel", real_interval="1d")
+    from data.pairs import panel_csv_path
+    panel = build_fx_panel(pair=pair, n_days=10000, seed=9,
+                           source="panel", real_interval="1d",
+                           panel_csv=panel_csv_path(pair))
     train_ds, val_ds, test_ds = time_split(panel)
     return panel, train_ds, val_ds, test_ds
 
 
+def _pair_garch_expert(pair, panel, ckpt_dir):
+    """Per-pair walk-forward GARCH forecasts: prefer the pair's own npz saved
+    beside its checkpoint (train_pairs.py), fall back to the gold loader."""
+    import hashlib
+    npz = os.path.join(ckpt_dir, "garch_expert_preds.npz")
+    if os.path.exists(npz):
+        z = np.load(npz, allow_pickle=True)
+        md5 = hashlib.md5(np.asarray(panel.close, dtype=np.float64).tobytes()).hexdigest()
+        if str(z["close_md5"]) == md5:
+            return {int(t): p for t, p in zip(z["origins"], z["preds"])}
+    from main import _load_garch_expert
+    return _load_garch_expert(panel)
+
+
 @st.cache_resource(show_spinner="Loading trained model + XGBoost expert …")
-def load_model_and_xgb():
-    """Returns (hybrid, xgb, test_x) or None if no checkpoint exists yet."""
-    if not os.path.exists(os.path.join(CKPT, "hybrid.pt")):
+def load_model_and_xgb(pair: str = "XAU/USD"):
+    """Returns (hybrid, xgb, test_x, panel, test_ds) for `pair`, or None if
+    that pair has no saved checkpoint yet."""
+    from data.pairs import checkpoint_dir
+    ckpt = checkpoint_dir(pair)
+    if not os.path.exists(os.path.join(ckpt, "hybrid.pt")):
         return None
     import joblib
     from baselines.xgboost_baseline import XGBoostForexModel, XGBAugmentedDataset
     from models.hybrid_model import HybridCNNLSTMTransformer
-    panel, train_ds, val_ds, test_ds = load_panel_and_splits()
+    panel, train_ds, val_ds, test_ds = load_panel_and_splits(pair)
     xgb = XGBoostForexModel()
-    xgb.model = joblib.load(os.path.join(CKPT, "xgb.pkl"))  # fitted MultiOutputRegressor
-    # second expert: walk-forward GARCH forecasts (stacked when available)
-    from main import _load_garch_expert
-    garch_by = _load_garch_expert(panel)
+    xgb.model = joblib.load(os.path.join(ckpt, "xgb.pkl"))  # fitted MultiOutputRegressor
+    # second expert: this pair's walk-forward GARCH forecasts (stacked)
+    garch_by = _pair_garch_expert(pair, panel, ckpt)
     gp = None if garch_by is None else np.stack([garch_by[t] for t in test_ds.indices])
     test_x = XGBAugmentedDataset(test_ds, xgb, garch_preds=gp)
     hybrid = HybridCNNLSTMTransformer()
-    hybrid.load_state_dict(torch.load(os.path.join(CKPT, "hybrid.pt"), map_location="cpu"))
+    hybrid.load_state_dict(torch.load(os.path.join(ckpt, "hybrid.pt"), map_location="cpu"))
     hybrid.eval()
     return hybrid, xgb, test_x, panel, test_ds
 
@@ -127,7 +145,7 @@ def metric_card(col, label, value, color=NAVY, sub=""):
         f"<div style='color:{SLATE};font-size:11px'>{sub}</div></div>", unsafe_allow_html=True)
 
 
-def compute_live_forecast(hybrid, xgb, fetch_news=False):
+def compute_live_forecast(hybrid, xgb, pair="XAU/USD", fetch_news=False):
     """GENUINE out-of-sample forecast: fetch fresh live price + macro (yfinance),
     engineer the last 60-bar window, normalise with the training statistics, and
     run the saved model to predict the next 10 trading days.
@@ -143,9 +161,9 @@ def compute_live_forecast(hybrid, xgb, fetch_news=False):
         _os.environ.pop("FOREX_OFFLINE_NEWS", None)      # live news top-up (slow)
     else:
         _os.environ["FOREX_OFFLINE_NEWS"] = "1"          # cached archive (fast)
-    fresh = build_fx_panel(pair="XAU/USD", n_days=10000, source="real", real_interval="1d")
+    fresh = build_fx_panel(pair=pair, n_days=10000, source="real", real_interval="1d")
 
-    panel = load_panel_and_splits()[0]                       # committed panel -> train stats
+    panel = load_panel_and_splits(pair)[0]                   # committed panel -> train stats
     n = len(panel.close); train_end = int(n * DATA_CFG.train_frac)
     mu = panel.features[:train_end].mean(axis=0)
     sd = panel.features[:train_end].std(axis=0); sd[sd < 1e-6] = 1.0
@@ -350,8 +368,18 @@ def show_layer_dialog(key):
 
 
 # ----------------------------- sidebar -----------------------------
+from data.pairs import PAIRS as _PAIRS, get_pair, checkpoint_dir
+
 st.sidebar.title("📈 Decoding Currency Dynamics")
-st.sidebar.caption("Hybrid CNN-LSTM-Transformer · XAU/USD multi-step forecasting")
+st.sidebar.caption("Hybrid CNN-LSTM-Transformer · multi-currency multi-step forecasting")
+
+# ---- currency-pair selector: every page renders the selected pair's data ----
+_pair_labels = {cfg.label: name for name, cfg in _PAIRS.items()}
+_sel_label = st.sidebar.selectbox("💱 Currency pair", list(_pair_labels.keys()), index=0)
+PAIR = _pair_labels[_sel_label]
+PCFG = get_pair(PAIR)
+CKPT_PAIR = checkpoint_dir(PAIR)
+
 page = st.sidebar.radio("Navigate", [
     "🏠 Overview",
     "🧱 Architecture & Layer I/O",
@@ -359,13 +387,16 @@ page = st.sidebar.radio("Navigate", [
     "🔮 Live Prediction",
     "📈 Results & Baselines",
 ])
-meta = load_json(os.path.join(CKPT, "meta.json"))
+meta = load_json(os.path.join(CKPT_PAIR, "meta.json"))
 summ = load_json("multi_seed_summary.json")
 st.sidebar.divider()
-if meta:
-    st.sidebar.success(f"Checkpoint loaded · seed {meta['seed']}\nsaved {meta['saved_at']}")
+st.sidebar.markdown(f"**{PCFG.emoji} {PCFG.label}**")
+if meta and "saved_at" in meta:
+    st.sidebar.success(f"Checkpoint loaded · seed {meta.get('seed', 9)}\nsaved {meta['saved_at']}")
+elif meta:
+    st.sidebar.success(f"{PCFG.label} checkpoint loaded")
 else:
-    st.sidebar.warning("No checkpoint yet.\nRun `python dashboard/save_model.py`\nfor the Live Prediction page.")
+    st.sidebar.warning(f"No checkpoint for {PCFG.label} yet.\nRun `python train_pairs.py --pairs {PAIR}`")
 
 
 # ============================= 1. OVERVIEW =============================
@@ -416,8 +447,9 @@ if page.startswith("🏠"):
     with g2:
         st.subheader("🔭 Scope & approach")
         st.markdown(
-            "- Instrument: **XAU/USD (gold)**, daily bars, ~26 years of history\n"
-            "- **31 engineered features** across 3 streams, 60-bar lookback\n"
+            f"- Instruments: **gold (XAU/USD), silver (XAG/USD) & euro (EUR/USD)** — separate per-pair pipelines "
+            f"(currently viewing **{PCFG.label}**), daily bars\n"
+            f"- **{DATA_CFG.n_total_features} engineered features** across 3 streams, 60-bar lookback\n"
             "- **Two-pipeline** design: data extraction/verification, then train/test\n"
             "- Training: **freeze-and-tune**, Gaussian-NLL heads, modality masking, deep supervision\n"
             "- Decision layer: **conviction filtering** + costed backtest\n"
@@ -501,11 +533,14 @@ elif page.startswith("📊"):
     st.title("📊 Data & Feature Engineering")
     st.markdown("Three real, incrementally-cached streams are aligned to a common daily grid, giving "
                 f"**{DATA_CFG.n_total_features} features** per bar over a 60-bar lookback window.")
+    from data.pairs import panel_csv_path
     names = meta["feature_names"] if meta else None
-    if not os.path.exists("exports/feature_panel.csv"):
-        st.error("exports/feature_panel.csv not found — run `python build_dataset.py` first.")
+    _ppath = panel_csv_path(PAIR)
+    if not os.path.exists(_ppath):
+        st.error(f"{_ppath} not found — build {PCFG.label} first: "
+                 f"`FOREX_OFFLINE_NEWS=1 python build_dataset.py --pair {PAIR}`")
     else:
-        dfp = pd.read_csv("exports/feature_panel.csv")
+        dfp = pd.read_csv(_ppath)
         feat_cols = [c for c in dfp.columns if c not in ("date", "close", "realized_vol", "atr")]
         nt, nm = DATA_CFG.n_technical_features, DATA_CFG.n_macro_features
         tech, macro, sent = feat_cols[:nt], feat_cols[nt:nt+nm], feat_cols[nt+nm:]
@@ -516,7 +551,7 @@ elif page.startswith("📊"):
         st.divider()
         colA, colB = st.columns([2, 1])
         with colA:
-            st.subheader("Gold price (XAU/USD proxy, GC=F)")
+            st.subheader(f"{PCFG.emoji} {PCFG.label} price ({PCFG.ticker})")
             dts = pd.to_datetime(dfp["date"], utc=True, errors="coerce")
             fig = go.Figure(go.Scatter(x=dts, y=dfp["close"], line=dict(color=TEAL, width=1)))
             fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
@@ -573,8 +608,9 @@ elif page.startswith("📊"):
                                legend=dict(orientation="h", y=1.12), yaxis_title="sentiment")
             st.plotly_chart(sfig, use_container_width=True)
         with s2:
-            st.markdown("**FinBERT per-headline polarity** (whole news archive)")
-            arch = "exports/archive/news_GCF.csv"
+            st.markdown(f"**FinBERT per-headline polarity** ({PCFG.label} news archive)")
+            from data.real_data_feed import news_archive_path
+            arch = news_archive_path(PCFG.ticker)
             if os.path.exists(arch):
                 a = pd.read_csv(arch)
                 if "polarity" in a.columns:
@@ -615,7 +651,7 @@ elif page.startswith("📊"):
 # ===================== 4. LIVE PREDICTION =====================
 elif page.startswith("🔮"):
     st.title("🔮 Live Prediction")
-    bundle = load_model_and_xgb()
+    bundle = load_model_and_xgb(PAIR)
     if bundle is None:
         st.warning("No trained checkpoint found. Generate one first:")
         st.code("python dashboard/save_model.py", language="bash")
@@ -671,16 +707,22 @@ elif page.startswith("🔮"):
     # ---------- B. LIVE forecast: fetch fresh data + run the saved model ----------
     st.divider()
     st.subheader("🔮 FX Price Predict — live, out-of-sample")
-    st.markdown("This runs the **model pipeline from the saved model on fresh data**: it fetches **live gold price "
-                "and macro data** (and the latest cached news sentiment) for the last 60 trading days, engineers the "
-                "features, and forecasts the **next 10 trading days from today** — a genuine out-of-sample prediction "
-                "(no actual to compare against yet).")
+    st.markdown(f"This runs the **model pipeline from the saved model on fresh data**: it fetches **live "
+                f"{PCFG.label} price and macro data** (and the latest cached news sentiment) for the last 60 trading "
+                f"days, engineers the features, and forecasts the **next 10 trading days from today** — a genuine "
+                f"out-of-sample prediction (no actual to compare against yet).")
 
-    st.markdown("**🗓️ Scheduled events — next 5 trading days**")
-    next5 = pd.bdate_range(pd.Timestamp.today().normalize() + pd.Timedelta(days=1), periods=5)
-    st.dataframe(events_table(next5), use_container_width=True, hide_index=True)
-    st.caption("An upcoming FOMC decision or NFP release typically raises volatility — the model's uncertainty band "
-               "widens around such dates.")
+    st.markdown("**🗓️ Upcoming scheduled macro events** (shared across pairs — US Fed calendar)")
+    from utils.event_calendar import upcoming_events
+    ue = upcoming_events(pd.Timestamp.today().normalize(), n=6)
+    if ue:
+        ev_df = pd.DataFrame([{"Date": e["date"].strftime("%Y-%m-%d (%a)"),
+                               "Event": e["event"],
+                               "Countdown": ("today" if e["days_until"] == 0
+                                             else f"in {e['days_until']} days")} for e in ue])
+        st.dataframe(ev_df, use_container_width=True, hide_index=True)
+    st.caption("The next FOMC decisions and NFP (first-Friday payroll) releases with a live countdown — an upcoming "
+               "event typically raises volatility, so the model's uncertainty band widens around these dates.")
 
     bcol1, bcol2 = st.columns([1, 2])
     go_live = bcol1.button("🔮 FX Price Predict (live)", type="primary", use_container_width=True)
@@ -691,12 +733,12 @@ elif page.startswith("🔮"):
             msg = ("Fetching live price + macro + FRESH NEWS and running the model … (this can take a few minutes)"
                    if fetch_news else "Fetching live price + macro, aligning cached news, and running the model …")
             with st.spinner(msg):
-                st.session_state["live_fc"] = compute_live_forecast(hybrid, xgb, fetch_news=fetch_news)
+                st.session_state[f"live_fc_{PAIR}"] = compute_live_forecast(hybrid, xgb, pair=PAIR, fetch_news=fetch_news)
         except Exception as e:
             st.error(f"Live fetch failed (network / data source unavailable): {e}")
 
-    if "live_fc" in st.session_state:
-        F = st.session_state["live_fc"]
+    if f"live_fc_{PAIR}" in st.session_state:
+        F = st.session_state[f"live_fc_{PAIR}"]
         fc, bd = F["forecast"], F["band"]
         nd = F.get("news_days")
         st.success(f"Live forecast from the latest bar **{F['last_date']}** "
@@ -713,7 +755,7 @@ elif page.startswith("🔮"):
         lf.add_trace(go.Scatter(x=np.r_[0, h], y=np.r_[F["last_close"], price_path],
                                 name="predicted price", line=dict(color=GREEN, width=3)))
         lf.update_layout(height=320, template="plotly_white", margin=dict(l=0, r=0, t=10, b=0),
-                         xaxis_title="trading days ahead", yaxis_title="XAU/USD price (USD)")
+                         xaxis_title="trading days ahead", yaxis_title=f"{PCFG.name} price")
         st.plotly_chart(lf, use_container_width=True)
         d1 = "BUY" if fc[0] > 0 else "SELL"
         cc = st.columns(3)
@@ -732,7 +774,7 @@ elif page.startswith("🔮"):
         if wds and wcl is not None:
             pf = go.Figure(go.Scatter(x=wds, y=wcl, line=dict(color=TEAL, width=2), name="close"))
             pf.update_layout(height=250, template="plotly_white", margin=dict(l=0, r=0, t=10, b=0),
-                             yaxis_title="XAU/USD close (USD)", xaxis_title="last 60 trading days (live)")
+                             yaxis_title=f"{PCFG.name} close", xaxis_title="last 60 trading days (live)")
             st.plotly_chart(pf, use_container_width=True)
             with st.expander("📈 Live FX rates — last 60 days (table, newest first)"):
                 st.dataframe(pd.DataFrame({"date": wds, "close": np.round(wcl, 2)}).iloc[::-1],
