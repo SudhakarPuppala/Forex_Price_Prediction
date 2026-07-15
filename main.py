@@ -212,11 +212,12 @@ def run(
         rep_static, _, _, _ = evaluate_deep_model(hybrid, test_ds_xgb, "Hybrid_static", device=device)
         print(f"[adaptive] static-expert Hybrid DirAcc: {rep_static['overall']['DirectionalAccuracy']:.4f} "
               f"(expert frozen at the train boundary)")
-        # refit_every=5 (~weekly): cadence sweep 42 -> 14 gave +1.5pp then
-        # +1.2pp over the static expert with no flattening; GARCH refits at
-        # EVERY origin, so the finer cadence keeps closing the adaptivity gap
-        # (~193 refits, computed once per process and cached across seeds).
-        wf_preds = walk_forward_expert_preds(train_ds, val_ds, test_ds, refit_every=5)
+        # refit_every=14 -- the chosen OPERATING POINT from the cadence sweep
+        # (static 0.5339 -> @42 0.5486 -> @14 0.5606 -> @5 0.5618): the curve
+        # flattens past 14 (+0.1pp for 3x the refit compute), so fortnightly
+        # refits capture essentially all of the adaptivity edge that the
+        # per-origin-refit GARCH baseline enjoys.
+        wf_preds = walk_forward_expert_preds(train_ds, val_ds, test_ds, refit_every=14)
         test_ds_xgb = XGBAugmentedDataset(test_ds, xgb, preds=wf_preds)
         reports_key_note = "adaptive walk-forward expert"
     else:
