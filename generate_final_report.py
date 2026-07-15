@@ -677,6 +677,17 @@ Together the two results give the complete honest picture: <b>news sentiment car
 real 3–24 hour alpha window after publication, which is fully absorbed by the next daily
 close</b> — precisely why the daily-cadence model cannot monetise it, and the
 quantitative case for an intraday-resolution sentiment model as future work.</p>
+<p><b>Strategy conversion — the window is real but economically thin.</b> A pre-registered
+event-driven backtest (<code>analysis_intraday_strategy.py</code>: enter on each
+directional headline at the first hourly bar after publication, one position at a time,
+2 bps per side) shows the population-level accuracy does not survive realistic costs at
+the 3-hour hold (−38% net: the ≈+2 bps average edge is smaller than the 4 bps round
+trip), while the <b>6-hour hold is the only cost-surviving variant: +11.5% net, Sharpe
+0.79</b> — positive but below buy-and-hold over the same bull window (Sharpe 1.30). The
+honest conclusion: the post-publication drift is <i>statistically robust yet economically
+marginal at retail costs</i> — monetisation would need lower-cost execution or aggregation
+of the signal into the daily conviction stack rather than standalone headline-chasing.
+This is itself a textbook efficient-markets result and is reported as such.</p>
 """)
 
     # ---------------- 7. graphs ----------------

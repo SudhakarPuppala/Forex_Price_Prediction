@@ -1,0 +1,48 @@
+{
+  "window": [
+    "2024-02-21 05:00:00",
+    "2026-07-15 07:00:00"
+  ],
+  "n_bars": 13722,
+  "buy_hold_pct": 97.66371394854092,
+  "buy_hold_sharpe": 1.2955745587299146,
+  "cost_bps_per_side": 2.0,
+  "variants": {
+    "hold3h": {
+      "n_trades": 858,
+      "hit_rate": 0.42773892773892774,
+      "avg_trade_bps": -5.6193207357060055,
+      "total_net_pct": -38.253798041933074,
+      "annualised_sharpe": -4.372457095337722,
+      "max_drawdown_pct": 49.39728153609546,
+      "exposure": 0.1875819851333625
+    },
+    "hold6h": {
+      "n_trades": 763,
+      "hit_rate": 0.5058977719528178,
+      "avg_trade_bps": 1.4240634646187462,
+      "total_net_pct": 11.477884767863156,
+      "annualised_sharpe": 0.789462949625794,
+      "max_drawdown_pct": 15.872617479593378,
+      "exposure": 0.33362483602973325
+    },
+    "hold3h_counterMom": {
+      "n_trades": 698,
+      "hit_rate": 0.4684813753581662,
+      "avg_trade_bps": -3.584421979154477,
+      "total_net_pct": -22.134924167566073,
+      "annualised_sharpe": -2.6794420170316697,
+      "max_drawdown_pct": 36.14087685716944,
+      "exposure": 0.15260166156536947
+    },
+    "hold6h_counterMom": {
+      "n_trades": 628,
+      "hit_rate": 0.5,
+      "avg_trade_bps": -2.9238444146914326,
+      "total_net_pct": -16.774586097378187,
+      "annualised_sharpe": -1.496763827562539,
+      "max_drawdown_pct": 39.390226035938504,
+      "exposure": 0.2745955400087451
+    }
+  }
+}
