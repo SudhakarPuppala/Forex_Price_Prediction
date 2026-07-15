@@ -114,9 +114,13 @@ def run_pair(pair: str) -> dict:
           f"train={len(tr)} val={len(va)} test={len(te)}")
 
     garch_by = garch_expert_for(panel, [tr, va, te])
+    _zero = np.zeros(DATA_CFG.horizon, dtype="float32")
 
     def _g(ds):
-        return np.stack([garch_by[t] for t in ds.indices])
+        # Defensive: any origin the GARCH expert didn't cover (e.g. very early
+        # train windows below the fit's MIN_HISTORY) carries a zero forecast,
+        # which the model's GARCH trust gate simply learns to ignore.
+        return np.stack([np.asarray(garch_by.get(t, _zero), dtype="float32") for t in ds.indices])
 
     xgb = XGBoostForexModel()
     xgb.fit(tr, va)
