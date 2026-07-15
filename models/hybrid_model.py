@@ -155,7 +155,24 @@ class HybridCNNLSTMTransformer(nn.Module):
         nn.init.zeros_(self.xgb_trust_gate.weight)
         nn.init.zeros_(self.xgb_trust_gate.bias)
 
-        context_dim = d_model + MODEL_CFG.skip_embed_dim + MODEL_CFG.xgb_embed_dim
+        # --- GARCH expert branch (walk-forward AR(1)-GARCH(1,1) forecast,
+        # fused exactly like the XGBoost expert). The cadence sweep showed the
+        # benchmark's remaining directional edge is its per-origin-refit drift
+        # estimate; feeding that forecast as a second expert gives the network
+        # a GARCH-parity floor with the deep pathway supplying corrections. ---
+        self.garch_input_norm = nn.LayerNorm(MODEL_CFG.horizon)
+        self.garch_input_dropout = nn.Dropout(MODEL_CFG.decoder_dropout)
+        self.garch_embed = nn.Sequential(
+            nn.Linear(MODEL_CFG.horizon, MODEL_CFG.regime_hidden),
+            nn.GELU(),
+            nn.Dropout(MODEL_CFG.decoder_dropout),
+            nn.Linear(MODEL_CFG.regime_hidden, MODEL_CFG.xgb_embed_dim),
+        )
+        self.garch_trust_gate = nn.Linear(2, MODEL_CFG.horizon)
+        nn.init.zeros_(self.garch_trust_gate.weight)
+        nn.init.zeros_(self.garch_trust_gate.bias)
+
+        context_dim = d_model + MODEL_CFG.skip_embed_dim + 2 * MODEL_CFG.xgb_embed_dim
         self.regime_output = RegimeAwareOutputLayer(context_dim=context_dim)
         # Zero-init the decoder heads' final layers: the deep expert starts
         # at mu = 0 with sigma = one representative return (log_var = 0),
@@ -246,19 +263,40 @@ class HybridCNNLSTMTransformer(nn.Module):
         raw_sentiment = text[:, -1, :]                                    # (B, 12)
         skip = self.skip_proj(torch.cat([raw_macro, raw_sentiment], dim=-1))  # (B, 32)
 
+        # Expert inputs: xgb_pred is either (B, k) -- XGBoost only, GARCH
+        # treated as absent -- or (B, 2, k) with the two experts STACKED as
+        # [xgb, garch] (see XGBAugmentedDataset with garch_preds).
+        garch_pred = None
+        if xgb_pred is not None and xgb_pred.dim() == 3:
+            garch_pred = xgb_pred[:, 1]
+            xgb_pred = xgb_pred[:, 0]
         if xgb_pred is None:
             xgb_pred = torch.zeros(quant.size(0), MODEL_CFG.horizon, device=quant.device, dtype=quant.dtype)
+        has_garch = garch_pred is not None
+        if garch_pred is None:
+            garch_pred = torch.zeros_like(xgb_pred)
         xgb_normed = self.xgb_input_dropout(self.xgb_input_norm(xgb_pred))
         xgb_embed_raw = self.xgb_embed(xgb_normed)               # (B, 32)
 
         xgb_trust = torch.sigmoid(self.xgb_trust_gate(regime_ctx))  # (B, k)
         xgb_embed = xgb_embed_raw * xgb_trust.mean(dim=-1, keepdim=True)
 
-        context = torch.cat([deep_context, skip, xgb_embed], dim=-1)  # (B, 320)
+        garch_normed = self.garch_input_dropout(self.garch_input_norm(garch_pred))
+        garch_embed_raw = self.garch_embed(garch_normed)         # (B, 32)
+        garch_trust = torch.sigmoid(self.garch_trust_gate(regime_ctx))  # (B, k)
+        garch_embed = garch_embed_raw * garch_trust.mean(dim=-1, keepdim=True)
+
+        context = torch.cat([deep_context, skip, xgb_embed, garch_embed], dim=-1)  # (B, 352)
         deep_forecast, gate, band, log_var = self.regime_output(context, regime_ctx)
-        # Two-expert convex blend (deep supervision keeps the deep expert
-        # a complete forecaster; see training/train.py).
-        forecast = xgb_trust * xgb_pred + (1.0 - xgb_trust) * deep_forecast
+        # Three-expert NESTED convex blend: the deep expert and the tabular
+        # expert blend first (as before), then the GARCH expert blends with
+        # that mixture -- worst case the gates learn to defer entirely to the
+        # strongest expert; deep supervision keeps the deep expert complete.
+        inner = xgb_trust * xgb_pred + (1.0 - xgb_trust) * deep_forecast
+        # When no GARCH expert is supplied (2D input), skip the outer blend
+        # entirely -- otherwise the neutral gate would halve the forecast by
+        # mixing in the zero vector.
+        forecast = garch_trust * garch_pred + (1.0 - garch_trust) * inner if has_garch else inner
         direction_logits = self.direction_head(context)
         return {
             "forecast": forecast,
@@ -267,6 +305,7 @@ class HybridCNNLSTMTransformer(nn.Module):
             "log_var": log_var,
             "gate": gate,
             "xgb_trust": xgb_trust,
+            "garch_trust": garch_trust,
             "context": context,
             "direction_logits": direction_logits,
         }

@@ -173,11 +173,18 @@ def run(
     print("[features] lowest-importance (noise candidates):",
           ", ".join(f"{n}={v:.3f}" for n, v in importance_audit["bottom"]))
 
-    # Wrap datasets so every sample also carries XGBoost's (precomputed,
-    # frozen) prediction, for the Hybrid model to fuse internally.
-    train_ds_xgb = XGBAugmentedDataset(train_ds, xgb)
-    val_ds_xgb = XGBAugmentedDataset(val_ds, xgb)
-    test_ds_xgb = XGBAugmentedDataset(test_ds, xgb)
+    # Wrap datasets so every sample also carries the experts' (precomputed,
+    # frozen) predictions, for the Hybrid model to fuse internally. The second
+    # expert -- walk-forward AR(1)-GARCH(1,1) forecasts per origin, leakage-
+    # free even for train windows (each fit sees only data before its origin;
+    # build_garch_expert.py) -- is loaded from the committed npz when its
+    # close-series hash matches the panel.
+    garch_by = _load_garch_expert(panel)
+    def _g(ds):
+        return None if garch_by is None else np.stack([garch_by[t] for t in ds.indices])
+    train_ds_xgb = XGBAugmentedDataset(train_ds, xgb, garch_preds=_g(train_ds))
+    val_ds_xgb = XGBAugmentedDataset(val_ds, xgb, garch_preds=_g(val_ds))
+    test_ds_xgb = XGBAugmentedDataset(test_ds, xgb, garch_preds=_g(test_ds))
 
     print("\n=== Training Hybrid CNN-LSTM-Transformer (+ internally-fused XGBoost branch) ===")
     torch.manual_seed(seed)  # seed the MODEL INITIALISATION with the run's seed
@@ -218,7 +225,7 @@ def run(
         # refits capture essentially all of the adaptivity edge that the
         # per-origin-refit GARCH baseline enjoys.
         wf_preds = walk_forward_expert_preds(train_ds, val_ds, test_ds, refit_every=14)
-        test_ds_xgb = XGBAugmentedDataset(test_ds, xgb, preds=wf_preds)
+        test_ds_xgb = XGBAugmentedDataset(test_ds, xgb, preds=wf_preds, garch_preds=_g(test_ds))
         reports_key_note = "adaptive walk-forward expert"
     else:
         rep_static = None
@@ -320,6 +327,32 @@ def run(
     print(f"Human-readable report written to {html_path}  (charts also saved under {report_dir}/charts/)")
 
     return reports
+
+
+def _load_garch_expert(panel):
+    """Load the precomputed walk-forward GARCH expert forecasts
+    (exports/garch_expert_preds.npz, from build_garch_expert.py) as an
+    origin -> (horizon,) dict. Returns None -- with a loud note -- if the file
+    is missing or was built for a different close series, so the run degrades
+    to the single-expert (XGBoost-only) configuration instead of silently
+    feeding stale forecasts."""
+    import hashlib
+    import os
+
+    path = "exports/garch_expert_preds.npz"
+    if not os.path.exists(path):
+        print("[garch-expert] npz missing -- run `python build_garch_expert.py`; "
+              "continuing WITHOUT the GARCH expert.")
+        return None
+    z = np.load(path, allow_pickle=True)
+    close_md5 = hashlib.md5(np.asarray(panel.close, dtype=np.float64).tobytes()).hexdigest()
+    if str(z["close_md5"]) != close_md5:
+        print("[garch-expert] npz was built for a DIFFERENT close series -- rerun "
+              "`python build_garch_expert.py`; continuing WITHOUT the GARCH expert.")
+        return None
+    by = {int(t): p for t, p in zip(z["origins"], z["preds"])}
+    print(f"[garch-expert] loaded {len(by)} walk-forward GARCH forecasts (hash OK)")
+    return by
 
 
 def _text_dense_subset(dataset, panel, from_date):

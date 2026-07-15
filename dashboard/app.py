@@ -67,7 +67,11 @@ def load_model_and_xgb():
     panel, train_ds, val_ds, test_ds = load_panel_and_splits()
     xgb = XGBoostForexModel()
     xgb.model = joblib.load(os.path.join(CKPT, "xgb.pkl"))  # fitted MultiOutputRegressor
-    test_x = XGBAugmentedDataset(test_ds, xgb)
+    # second expert: walk-forward GARCH forecasts (stacked when available)
+    from main import _load_garch_expert
+    garch_by = _load_garch_expert(panel)
+    gp = None if garch_by is None else np.stack([garch_by[t] for t in test_ds.indices])
+    test_x = XGBAugmentedDataset(test_ds, xgb, garch_preds=gp)
     hybrid = HybridCNNLSTMTransformer()
     hybrid.load_state_dict(torch.load(os.path.join(CKPT, "hybrid.pt"), map_location="cpu"))
     hybrid.eval()
@@ -153,7 +157,16 @@ def compute_live_forecast(hybrid, xgb, fetch_news=False):
     xq = torch.from_numpy(norm[:, :nq]).unsqueeze(0)
     xt = torch.from_numpy(norm[:, nq:]).unsqueeze(0)
     rc = torch.tensor([[float(fresh.realized_vol[-1]), float(fresh.atr[-1])]], dtype=torch.float32)
-    xgp = torch.from_numpy(xgb.predict_batch(norm[None], rc.numpy())[0].astype("float32")).unsqueeze(0)
+    xgp_np = xgb.predict_batch(norm[None], rc.numpy())[0].astype("float32")
+    # second expert: fit AR(1)-GARCH(1,1) on the live close history (one fit,
+    # ~a second) so the live path matches the training-time expert stack.
+    try:
+        from baselines.garch_baseline import garch_multistep_forecast
+        garch_np = garch_multistep_forecast(np.asarray(fresh.close, dtype=np.float64),
+                                            DATA_CFG.horizon).astype("float32")
+    except Exception:
+        garch_np = np.zeros(DATA_CFG.horizon, dtype="float32")
+    xgp = torch.from_numpy(np.stack([xgp_np, garch_np])).unsqueeze(0)   # (1, 2, k)
 
     caught = {}
     h1 = hybrid.pool_attn.register_forward_hook(lambda m, i, o: caught.__setitem__("pool", o.detach()))
@@ -202,38 +215,44 @@ def events_table(dates):
     return pd.DataFrame(rows)
 
 
-def _forecast_from_window(hybrid, xgb, full, rc, nq):
+def _forecast_from_window(hybrid, xgb, full, rc, nq, garch_vec=None):
     """Run the FULL model (XGBoost expert recomputed on the window + deep path)
     for a (1,T,F) input window -> 10-step forecast."""
-    xgp = torch.from_numpy(xgb.predict_batch(full.numpy(), rc.numpy())[0].astype("float32")).unsqueeze(0)
+    xgp_np = xgb.predict_batch(full.numpy(), rc.numpy())[0].astype("float32")
+    if garch_vec is not None:
+        # GARCH is close-derived, not feature-derived, so it stays CONSTANT
+        # under feature perturbations -- stack the same vector every call.
+        xgp = torch.from_numpy(np.stack([xgp_np, np.asarray(garch_vec, dtype="float32")])).unsqueeze(0)
+    else:
+        xgp = torch.from_numpy(xgp_np).unsqueeze(0)
     with torch.no_grad():
         return hybrid(full[:, :, :nq], full[:, :, nq:], rc, xgp)["forecast"][0].numpy()
 
 
-def feature_impact(hybrid, xgb, xq, xt, rc, feature_names, nq):
+def feature_impact(hybrid, xgb, xq, xt, rc, feature_names, nq, garch_vec=None):
     """Impact of each feature: zero it across the window (remove its deviation
     from the training mean), RECOMPUTE the XGBoost expert, and measure the mean
     absolute change in the 10-step forecast through BOTH the deep and the fused
     tabular paths. Returns (base_forecast, [(name, impact), ...])."""
     hybrid.eval()
     full = torch.cat([xq, xt], dim=-1)  # (1,T,F)
-    base = _forecast_from_window(hybrid, xgb, full, rc, nq)
+    base = _forecast_from_window(hybrid, xgb, full, rc, nq, garch_vec)
     out = []
     for j, name in enumerate(feature_names):
         pert = full.clone(); pert[:, :, j] = 0.0
-        f = _forecast_from_window(hybrid, xgb, pert, rc, nq)
+        f = _forecast_from_window(hybrid, xgb, pert, rc, nq, garch_vec)
         out.append((name, float(np.abs(f - base).mean())))
     return base, out
 
 
-def stream_impact(hybrid, xgb, xq, xt, rc, nq, nt, nm):
+def stream_impact(hybrid, xgb, xq, xt, rc, nq, nt, nm, garch_vec=None):
     """Impact of zeroing each ENTIRE stream (technical / macro / sentiment),
     with XGBoost recomputed. Returns dict of stream -> impact."""
     full = torch.cat([xq, xt], dim=-1)
-    base = _forecast_from_window(hybrid, xgb, full, rc, nq)
+    base = _forecast_from_window(hybrid, xgb, full, rc, nq, garch_vec)
     def zr(a, b):
         p = full.clone(); p[:, :, a:b] = 0.0
-        return float(np.abs(_forecast_from_window(hybrid, xgb, p, rc, nq) - base).mean())
+        return float(np.abs(_forecast_from_window(hybrid, xgb, p, rc, nq, garch_vec) - base).mean())
     total = full.shape[-1]
     return {"Technical / FX": zr(0, nt), "Macro": zr(nt, nt + nm), "News sentiment": zr(nt + nm, total)}
 
@@ -643,7 +662,8 @@ elif page.startswith("🔮"):
     metric_card(c[0], "1-step direction", sig, GREEN if sig == "BUY" else AMBER)
     metric_card(c[1], "Directional hit-rate", f"{dir_hit*100:.0f}%", TEAL, "this window, 10 horizons")
     metric_card(c[2], "Conviction |μ|/σ", f"{conv:.2f}", NAVY, "t-statistic of the 1-step move")
-    metric_card(c[3], "XGBoost expert (1-step)", f"{xgb_pred[0].item():+.4f}", SLATE, "fused internal expert")
+    _xv = xgb_pred[0, 0] if xgb_pred.dim() == 2 else xgb_pred[0]
+    metric_card(c[3], "XGBoost expert (1-step)", f"{_xv.item():+.4f}", SLATE, "fused internal expert")
     with st.expander("🔬 Per-layer output shapes for this prediction"):
         st.dataframe(pd.DataFrame(capture_layer_io(hybrid, xb["x_quant"], xb["x_text"],
                      xb["regime_ctx"], xb["xgb_pred"])), use_container_width=True, hide_index=True)
@@ -762,8 +782,9 @@ elif page.startswith("🔮"):
         # 2. feature impact (XGBoost expert recomputed -> full-model sensitivity)
         st.markdown("##### 2 · What drove this forecast — indicator, macro & sentiment impact")
         with st.spinner("Measuring feature impact …"):
-            grp = stream_impact(hybrid, xgb, xq_t, xt_t, rc_t, nqf, nt, nm)
-            base, impacts = feature_impact(hybrid, xgb, xq_t, xt_t, rc_t, fnames, nqf)
+            gvec = F["xgp"][0][1] if np.asarray(F["xgp"]).ndim == 3 else None
+            grp = stream_impact(hybrid, xgb, xq_t, xt_t, rc_t, nqf, nt, nm, garch_vec=gvec)
+            base, impacts = feature_impact(hybrid, xgb, xq_t, xt_t, rc_t, fnames, nqf, garch_vec=gvec)
         gtot = sum(grp.values()) + 1e-12
         grp_pct = {k: 100 * v / gtot for k, v in grp.items()}
         idf = pd.DataFrame(impacts, columns=["feature", "impact"]).sort_values("impact", ascending=False)
@@ -816,7 +837,9 @@ elif page.startswith("🔮"):
         st.markdown("##### 3 · How the training techniques shaped THIS forecast (live values)")
         deep = np.asarray(F.get("deep_forecast", fc)); xtrust = F.get("xgb_trust")
         presence = F.get("presence"); news_days = F.get("news_days")
-        xgb1 = float(F["xgp"][0][0]); fc1 = float(fc[0]); deep1 = float(deep[0])
+        _xa = np.asarray(F["xgp"])
+        xgb1 = float(_xa[0, 0, 0]) if _xa.ndim == 3 else float(_xa[0, 0])
+        fc1 = float(fc[0]); deep1 = float(deep[0])
         sig1 = float(bd[0]) if bd is not None else None
         conv = abs(fc1) / (sig1 + 1e-9) if sig1 else None
         fmt = lambda a: "[" + ", ".join(f"{v:+.4f}" for v in a[:5]) + " …]"

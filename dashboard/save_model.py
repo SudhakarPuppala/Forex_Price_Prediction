@@ -45,9 +45,14 @@ def main():
     print("[save_model] fitting XGBoost expert ...")
     xgb = XGBoostForexModel()
     xgb.fit(train_ds, val_ds)
-    train_x = XGBAugmentedDataset(train_ds, xgb)
-    val_x = XGBAugmentedDataset(val_ds, xgb)
-    test_x = XGBAugmentedDataset(test_ds, xgb)
+    from main import _load_garch_expert
+    garch_by = _load_garch_expert(panel)
+    import numpy as np
+    def _g(ds):
+        return None if garch_by is None else np.stack([garch_by[t] for t in ds.indices])
+    train_x = XGBAugmentedDataset(train_ds, xgb, garch_preds=_g(train_ds))
+    val_x = XGBAugmentedDataset(val_ds, xgb, garch_preds=_g(val_ds))
+    test_x = XGBAugmentedDataset(test_ds, xgb, garch_preds=_g(test_ds))
 
     print("[save_model] training Hybrid (two-stage freeze-and-tune) ...")
     torch.manual_seed(SEED)

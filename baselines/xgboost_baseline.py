@@ -74,7 +74,8 @@ class XGBAugmentedDataset:
     weigh it -- not a single global scalar blend fitted after the fact.
     """
 
-    def __init__(self, base_dataset, xgb_model: "XGBoostForexModel", preds: np.ndarray = None):
+    def __init__(self, base_dataset, xgb_model: "XGBoostForexModel", preds: np.ndarray = None,
+                 garch_preds: np.ndarray = None):
         self.base_dataset = base_dataset
         if preds is not None:
             # Caller-supplied predictions (e.g. the WALK-FORWARD refit expert,
@@ -84,6 +85,13 @@ class XGBAugmentedDataset:
             X, _ = build_xgb_feature_matrix(base_dataset)
             self.xgb_preds = xgb_model.model.predict(X).astype("float32")  # (N, horizon), precomputed once
         assert len(self.xgb_preds) == len(base_dataset)
+        # Optional second expert: walk-forward GARCH forecasts per window.
+        # When present, __getitem__ yields a STACKED (2, horizon) expert
+        # tensor [xgb, garch] that the model splits (models/hybrid_model.py).
+        self.garch_preds = None
+        if garch_preds is not None:
+            self.garch_preds = np.asarray(garch_preds, dtype="float32")
+            assert len(self.garch_preds) == len(base_dataset)
 
     def __len__(self):
         return len(self.base_dataset)
@@ -91,6 +99,8 @@ class XGBAugmentedDataset:
     def __getitem__(self, idx):
         x_quant, x_text, y, regime_ctx = self.base_dataset[idx]
         xgb_pred = torch.from_numpy(self.xgb_preds[idx])
+        if self.garch_preds is not None:
+            xgb_pred = torch.stack([xgb_pred, torch.from_numpy(self.garch_preds[idx])])  # (2, k)
         return x_quant, x_text, y, regime_ctx, xgb_pred
 
     @property
