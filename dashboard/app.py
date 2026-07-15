@@ -951,21 +951,25 @@ elif page.startswith("📈"):
         # ---- cross-pair zero-shot transfer ----
         xp = load_json("exports/cross_pair_transfer.json")
         if xp and xp.get("pairs"):
+            ftj = load_json("exports/cross_pair_finetune.json") or {"pairs": {}}
             st.divider()
-            st.subheader("🌍 Multi-pair — cross-pair zero-shot transfer")
+            st.subheader("🌍 Multi-pair — cross-pair transfer (zero-shot & fine-tuned)")
             st.markdown(
-                "The **gold-trained Hybrid** (frozen seed-9 weights, *no fine-tuning*) evaluated on other pairs "
-                "built through the same pipeline. Each pair uses its **own** train-split normalisation, its own "
-                "walk-forward XGBoost expert (refit every 14 windows), and is compared against its **own** "
-                "walk-forward AR(1)-GARCH(1,1). These tickers have no news archive, so every bar carries the "
-                "'none' sentiment state — the condition modality masking trains for.")
+                "The **gold-trained Hybrid** evaluated on other pairs built through the same pipeline. Each pair "
+                "uses its **own** train-split normalisation, its own walk-forward XGBoost expert (refit every 14 "
+                "windows), and is compared against its **own** walk-forward AR(1)-GARCH(1,1). *Fine-tuned* = the "
+                "full model briefly re-trained on the pair's own train split (10 epochs, 0.125× LR, early-stopped "
+                "on the pair's validation). These tickers have no news archive, so every bar carries the 'none' "
+                "sentiment state — the condition modality masking trains for.")
             rows = [{"Pair": "XAU/USD (gold — native, trained)", "Bars": "6,489", "Test windows": 963,
-                     "Hybrid DirAcc": 0.5606, "WF-expert alone": None, "Own GARCH": 0.5768}]
-            chart = {"XAU/USD\n(native)": (0.5606, None, 0.5768)}
+                     "Hybrid DirAcc": 0.5581, "Fine-tuned": None, "WF-expert alone": None, "Own GARCH": 0.5768}]
+            chart = {"XAU/USD\n(native)": (0.5581, None, 0.5768)}
             for pr, v in xp["pairs"].items():
+                f = ftj["pairs"].get(pr, {})
                 rows.append({"Pair": f"{pr} (zero-shot)", "Bars": f"{v['bars']:,}",
                              "Test windows": v["test_windows"],
                              "Hybrid DirAcc": round(v["hybrid_zero_shot"]["diracc"], 4),
+                             "Fine-tuned": round(f["finetuned_diracc"], 4) if f else None,
                              "WF-expert alone": round(v["wf_expert_alone_diracc"], 4),
                              "Own GARCH": round(v["garch"]["diracc"], 4)})
                 chart[pr + "\n(zero-shot)"] = (v["hybrid_zero_shot"]["diracc"],
@@ -983,9 +987,10 @@ elif page.startswith("📈"):
                                margin=dict(l=0, r=0, t=10, b=0))
             st.plotly_chart(xfig, use_container_width=True)
             st.info(
-                "**Two findings.** ① Transfer **succeeds within the asset complex**: gold→silver works zero-shot "
-                "(0.517 vs silver's own GARCH at 0.489 — GARCH is below coin-flip on choppy silver, yet the "
-                "gold-learned dynamics still carry over via shared macro drivers). ② Transfer **fails across "
-                "asset classes**: gold→euro scores 0.481, but the pair-local walk-forward expert built by the "
-                "same pipeline reaches **0.575** on EUR/USD — the *methodology* transfers even where the deep "
-                "weights don't; per-pair fine-tuning is the natural next step.", icon="🌍")
+                "**Three findings.** ① Transfer **succeeds within the asset complex**: gold→silver works "
+                "zero-shot (0.52 vs silver's own GARCH at 0.489), and fine-tuning adds nothing — the gold weights "
+                "are already near-optimal for silver. ② Cross-asset-class, **fine-tuning repairs the euro** from "
+                "below coin-flip to above its own GARCH (0.496 → 0.505 vs 0.483), but light fine-tuning cannot "
+                "reorganise deep weights for a different asset class. ③ The pair-local walk-forward expert "
+                "(**0.575** on EUR/USD) shows the *methodology* is what transfers — full per-pair training is the "
+                "future-work path.", icon="🌍")

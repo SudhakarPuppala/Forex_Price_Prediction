@@ -1149,12 +1149,13 @@ drift direction, and the drift-quality gate restricts trading to persistent-tren
 (where it clears 0.60 in trending years and honestly dips in chop, e.g. 2022). Unfiltered
 all-bars accuracy remains ~0.53 vs GARCH 0.577.</p>
 
-<p><b>Cross-pair zero-shot transfer.</b> The gold-trained Hybrid (frozen seed-9 weights,
-<i>no fine-tuning</i>) evaluated on other pairs built through the same pipeline — each
-pair uses its own train-split normalisation, its own walk-forward XGBoost expert
-(refit every 14 windows) and is compared against its own walk-forward
-AR(1)-GARCH(1,1). No news archive exists for these tickers, so every bar carries the
-explicit 'none' sentiment state (the condition modality masking trains for):</p>
+<p><b>Cross-pair transfer: zero-shot and fine-tuned.</b> The gold-trained Hybrid
+evaluated on other pairs built through the same pipeline — each pair uses its own
+train-split normalisation, its own walk-forward XGBoost expert (refit every 14 windows)
+and its own walk-forward GARCH expert/baseline. No news archive exists for these tickers,
+so every bar carries the explicit 'none' sentiment state (the condition modality masking
+trains for). "Fine-tuned" = the full model briefly re-trained on the pair's own train
+split (10 epochs, 0.125× LR, early-stopped on the pair's validation):</p>
 <table class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -1162,6 +1163,7 @@ explicit 'none' sentiment state (the condition modality masking trains for):</p>
       <th>Bars</th>
       <th>Test windows</th>
       <th>Hybrid (zero-shot) DirAcc</th>
+      <th>Fine-tuned DirAcc</th>
       <th>WF-expert alone</th>
       <th>Own GARCH DirAcc</th>
     </tr>
@@ -1172,6 +1174,7 @@ explicit 'none' sentiment state (the condition modality masking trains for):</p>
       <td>6,493</td>
       <td>963</td>
       <td>0.5167</td>
+      <td>0.5189</td>
       <td>0.5132</td>
       <td>0.4891</td>
     </tr>
@@ -1180,11 +1183,19 @@ explicit 'none' sentiment state (the condition modality masking trains for):</p>
       <td>5,869</td>
       <td>870</td>
       <td>0.4807</td>
+      <td>0.5049</td>
       <td>0.5753</td>
       <td>0.4828</td>
     </tr>
   </tbody>
 </table>
+<p class="small">Reading: transfer works zero-shot <b>within the precious-metal
+complex</b> (silver beats its own GARCH with gold's weights; fine-tuning adds nothing —
+the weights are already near-optimal for silver). Cross-asset-class, fine-tuning
+<b>repairs</b> the euro from below coin-flip to above its own GARCH, but light
+fine-tuning cannot reorganise deep weights for a different asset class — the pair-local
+adaptive expert (0.575 on EUR/USD) shows the <i>methodology</i> is what transfers, and
+full per-pair training is the future-work path.</p>
 
 <p><b>Inter-model consensus (committee-vote) filter:</b> the per-seed backtests swung
 widely, so instead of trusting one seed, the framework trades the 1-step forecast only

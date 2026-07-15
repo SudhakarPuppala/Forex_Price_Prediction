@@ -879,23 +879,35 @@ all-bars accuracy remains ~0.53 vs GARCH 0.577.</p>
         # ---- cross-pair zero-shot transfer (roadmap item: add currency pairs) ----
         if os.path.exists("exports/cross_pair_transfer.json"):
             xp = json.load(open("exports/cross_pair_transfer.json"))
+            ft = (json.load(open("exports/cross_pair_finetune.json"))
+                  if os.path.exists("exports/cross_pair_finetune.json") else {"pairs": {}})
             xp_rows = []
             for pr, v in xp.get("pairs", {}).items():
+                f = ft["pairs"].get(pr, {})
                 xp_rows.append({
                     "Pair": pr, "Bars": f"{v['bars']:,}", "Test windows": v["test_windows"],
                     "Hybrid (zero-shot) DirAcc": round(v["hybrid_zero_shot"]["diracc"], 4),
+                    "Fine-tuned DirAcc": round(f["finetuned_diracc"], 4) if f else "—",
                     "WF-expert alone": round(v["wf_expert_alone_diracc"], 4),
                     "Own GARCH DirAcc": round(v["garch"]["diracc"], 4),
                 })
             if xp_rows:
                 S.append(f"""
-<p><b>Cross-pair zero-shot transfer.</b> The gold-trained Hybrid (frozen seed-9 weights,
-<i>no fine-tuning</i>) evaluated on other pairs built through the same pipeline — each
-pair uses its own train-split normalisation, its own walk-forward XGBoost expert
-(refit every 14 windows) and is compared against its own walk-forward
-AR(1)-GARCH(1,1). No news archive exists for these tickers, so every bar carries the
-explicit 'none' sentiment state (the condition modality masking trains for):</p>
+<p><b>Cross-pair transfer: zero-shot and fine-tuned.</b> The gold-trained Hybrid
+evaluated on other pairs built through the same pipeline — each pair uses its own
+train-split normalisation, its own walk-forward XGBoost expert (refit every 14 windows)
+and its own walk-forward GARCH expert/baseline. No news archive exists for these tickers,
+so every bar carries the explicit 'none' sentiment state (the condition modality masking
+trains for). "Fine-tuned" = the full model briefly re-trained on the pair's own train
+split (10 epochs, 0.125× LR, early-stopped on the pair's validation):</p>
 {df_to_html(pd.DataFrame(xp_rows), floatfmt="{:.4f}")}
+<p class="small">Reading: transfer works zero-shot <b>within the precious-metal
+complex</b> (silver beats its own GARCH with gold's weights; fine-tuning adds nothing —
+the weights are already near-optimal for silver). Cross-asset-class, fine-tuning
+<b>repairs</b> the euro from below coin-flip to above its own GARCH, but light
+fine-tuning cannot reorganise deep weights for a different asset class — the pair-local
+adaptive expert (0.575 on EUR/USD) shows the <i>methodology</i> is what transfers, and
+full per-pair training is the future-work path.</p>
 """)
 
         cons = rm.get("consensus")
