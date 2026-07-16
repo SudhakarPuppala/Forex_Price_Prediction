@@ -23,6 +23,7 @@ import torch
 
 from config import DATA_CFG, TRAIN_CFG
 from data.dataset import build_fx_panel, time_split
+from data.pairs import checkpoint_dir, panel_csv_path
 from baselines.xgboost_baseline import XGBoostForexModel, XGBAugmentedDataset
 from models.hybrid_model import HybridCNNLSTMTransformer
 from training.train import train_two_stage
@@ -30,12 +31,12 @@ from training.evaluate import evaluate_deep_model
 from main import _text_dense_subset
 
 SEED = 9
-OUTDIR = "exports/dashboard"
+OUTDIR = checkpoint_dir("XAU/USD")   # exports/dashboard/XAUUSD/
 os.makedirs(OUTDIR, exist_ok=True)
 
 
 def main():
-    print("[save_model] building panel from exports/feature_panel.csv ...")
+    print(f"[save_model] building panel from {panel_csv_path('XAU/USD')} ...")
     panel = build_fx_panel(pair="XAU/USD", n_days=10000, seed=SEED,
                            source="panel", real_interval="1d")
     train_ds, val_ds, test_ds = time_split(panel)

@@ -105,9 +105,9 @@ def _export_intermediates(real: dict, exports_dir: str = "exports", pair: str = 
     polarity/confidence score, and (later, from _assemble_panel via
     export_sentiment_features) the per-bar sentiment feature panel.
 
-    Paths are PER PAIR (data/pairs.py): gold keeps the legacy top-level
-    filenames, silver/euro write under exports/pairs/<slug>/ so a cross-pair
-    build never overwrites gold's raw extracts.
+    Paths are PER PAIR (data/pairs.py): every pair (gold included) writes under
+    exports/pairs/<slug>/ so a cross-pair build never overwrites another pair's
+    raw extracts.
     Failures are non-fatal -- exports must never break a training run.
     """
     import os
@@ -146,7 +146,7 @@ def _export_intermediates(real: dict, exports_dir: str = "exports", pair: str = 
         merged.to_csv(arch_path)
         print(f"[data] Archive grown: {arch_path} now holds {len(merged):,} bars.")
 
-        print(f"[data] Intermediate CSVs written to {exports_dir}/ "
+        print(f"[data] Intermediate CSVs written to {intermediate_path(pair, '', exports_dir)} "
               f"(fx_prices_yfinance.csv, news_headlines_scored.csv"
               f"{', macro_fred.csv' if real.get('macro') is not None else ''})")
     except Exception as e:
@@ -233,7 +233,8 @@ def build_fx_panel(
                 macro = _synthetic_macro_stream(ohlc.index, seed=seed + 1)
                 macro_src = "synthetic (FRED unreachable)"
             news = real["news_aligned"]
-            print(f"[data] Using LIVE data: {len(ohlc)} candles from Yahoo Finance, "
+            print(f"[data] Using LIVE data: {len(ohlc)} candles from {real.get('interval','?')} "
+                  f"price feed (MT5 live / yfinance fallback), "
                   f"{real['n_raw_headlines']} raw headlines (GDELT + RSS), macro: {macro_src}.")
             panel = _assemble_panel(ohlc, macro, news, source="real")
             export_sentiment_features(panel, pair=pair)

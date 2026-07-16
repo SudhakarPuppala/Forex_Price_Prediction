@@ -692,9 +692,17 @@ def fetch_real_macro(bar_index: pd.DatetimeIndex, timeout: int = 30) -> Optional
 
     first_year = max(1990, pd.to_datetime(bar_index.min()).year - 2)
     cpi = _fetch_bls_cpi(first_year, timeout=timeout)
-    if cpi is None:
-        return None
-    series["cpi"] = cpi
+    # GRACEFUL DEGRADATION: BLS is flaky (unregistered requests get
+    # REQUEST_NOT_PROCESSED / rate-limited). Rather than discard the good
+    # Yahoo rates/yields/DXY when only CPI is missing, keep the real market
+    # macro and neutralise just the CPI-derived features (set to 0). This is
+    # far more honest than falling back to a FULLY synthetic macro stream.
+    cpi_available = cpi is not None
+    if cpi_available:
+        series["cpi"] = cpi
+    else:
+        print("[real_data_feed] BLS CPI unavailable -- keeping REAL Yahoo "
+              "rates/yields/DXY, neutralising CPI features (0).")
 
     # Normalise the bar index to naive dates for joining daily macro data.
     # Intraday indexes map many bars onto the same date (duplicates), so
@@ -707,18 +715,27 @@ def fetch_real_macro(bar_index: pd.DatetimeIndex, timeout: int = 30) -> Optional
         on_uniq = s.reindex(s.index.union(uniq_dates)).ffill().reindex(uniq_dates)
         return on_uniq.reindex(bar_dates).values
 
-    cpi = series["cpi"]
-    cpi_yoy = cpi.pct_change(12) * 100
-    cpi_mom = cpi.pct_change(1) * 100
+    if cpi_available:
+        cpi = series["cpi"]
+        cpi_yoy = cpi.pct_change(12) * 100
+        cpi_mom = cpi.pct_change(1) * 100
 
-    # Days since the last CPI data point (a release-recency clock).
-    cpi_dates = cpi.index.values.astype("datetime64[D]")
-    bar_d = bar_dates.values.astype("datetime64[D]")
-    idx = np.searchsorted(cpi_dates, bar_d, side="right") - 1
-    days_since = np.where(
-        idx >= 0, (bar_d - cpi_dates[np.clip(idx, 0, None)]).astype(int), 60
-    )
-    days_since = np.clip(days_since, 0, 60) / 60.0
+        # Days since the last CPI data point (a release-recency clock).
+        cpi_dates = cpi.index.values.astype("datetime64[D]")
+        bar_d = bar_dates.values.astype("datetime64[D]")
+        idx = np.searchsorted(cpi_dates, bar_d, side="right") - 1
+        days_since = np.where(
+            idx >= 0, (bar_d - cpi_dates[np.clip(idx, 0, None)]).astype(int), 60
+        )
+        days_since = np.clip(days_since, 0, 60) / 60.0
+        cpi_yoy_bars = ffill_onto_bars(cpi_yoy)
+        cpi_mom_bars = ffill_onto_bars(cpi_mom)
+    else:
+        # CPI unavailable -> neutral (constant 0) CPI features; real market
+        # macro below is unaffected.
+        cpi_yoy_bars = np.zeros(len(bar_index))
+        cpi_mom_bars = np.zeros(len(bar_index))
+        days_since = np.zeros(len(bar_index))
 
     # STATIONARY, scale-free macro inputs. Raw levels (a 4% yield in 2007
     # vs 0.1% in 2020, DXY at 70 vs 110) create a train/test distribution
@@ -743,14 +760,15 @@ def fetch_real_macro(bar_index: pd.DatetimeIndex, timeout: int = 30) -> Optional
             "rate_z21": rate_z21,
             "yield_chg5": yield_chg5,
             "dollar_ret5": dollar_ret5,
-            "cpi_yoy": ffill_onto_bars(cpi_yoy),
-            "cpi_mom": ffill_onto_bars(cpi_mom),
+            "cpi_yoy": cpi_yoy_bars,
+            "cpi_mom": cpi_mom_bars,
             "days_since_cpi": days_since,
         },
         index=bar_index,
     ).ffill().fillna(0.0)
 
-    print(f"[real_data_feed] real macro OK: ^IRX/^TNX/DXY (Yahoo) + CPI (BLS), "
+    cpi_src = "CPI (BLS)" if cpi_available else "CPI (neutralised -- BLS down)"
+    print(f"[real_data_feed] real macro OK: ^IRX/^TNX/DXY (Yahoo) + {cpi_src}, "
           f"stationary transforms, aligned to {len(macro)} bars.")
     return macro
 
@@ -850,16 +868,20 @@ def try_fetch_real_panel(ticker_symbol: str = "GC=F", interval: str = "5m", coun
     from data.pairs import pair_for_ticker
     cfg = pair_for_ticker(ticker_symbol)   # None for unknown tickers -> gold defaults
 
-    # Prefer MT5-exported rates when the user has dropped a CSV for this pair
-    # (data/mt5_feed.py). MT5's Python API is Windows-only, so this is the
-    # cross-platform path to MT5's longer/cleaner FX history. Falls through to
-    # yfinance transparently when no MT5 file is present.
+    # PRICE SOURCE PRIORITY: live MT5 API -> MT5-exported CSV -> yfinance.
+    # On Windows with a running MT5 terminal we pull rates directly (read-only
+    # attach; see data/mt5_feed.load_mt5_live). `count` maps to the last N bars,
+    # which serves both the historical training pull (large count) and the live
+    # inference pull (count=60). Falls through transparently when MT5 is
+    # unavailable. FOREX_NO_MT5=1 disables both MT5 paths.
     ohlc = None
     if cfg is not None and os.environ.get("FOREX_NO_MT5") != "1":
-        from data.mt5_feed import load_mt5_ohlc
-        ohlc = load_mt5_ohlc(cfg.name, interval)
-        if ohlc is not None and count:
-            ohlc = ohlc.tail(int(count))
+        from data.mt5_feed import load_mt5_live, load_mt5_ohlc
+        ohlc = load_mt5_live(cfg.name, interval, count=count)
+        if ohlc is None:
+            ohlc = load_mt5_ohlc(cfg.name, interval)
+            if ohlc is not None and count:
+                ohlc = ohlc.tail(int(count))
     if ohlc is None:
         ohlc = fetch_gold_candles(ticker_symbol=ticker_symbol, interval=interval, count=count)
     if ohlc is None or ohlc.empty:

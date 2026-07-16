@@ -329,17 +329,20 @@ def run(
     return reports
 
 
-def _load_garch_expert(panel):
-    """Load the precomputed walk-forward GARCH expert forecasts
-    (exports/garch_expert_preds.npz, from build_garch_expert.py) as an
-    origin -> (horizon,) dict. Returns None -- with a loud note -- if the file
-    is missing or was built for a different close series, so the run degrades
-    to the single-expert (XGBoost-only) configuration instead of silently
-    feeding stale forecasts."""
+def _load_garch_expert(panel, path=None):
+    """Load the precomputed walk-forward GARCH expert forecasts as an
+    origin -> (horizon,) dict. `path` defaults to gold's per-pair checkpoint
+    (exports/dashboard/XAUUSD/garch_expert_preds.npz); pass an explicit path
+    for other pairs. Returns None -- with a loud note -- if the file is missing
+    or was built for a different close series, so the run degrades to the
+    single-expert (XGBoost-only) configuration instead of silently feeding
+    stale forecasts."""
     import hashlib
     import os
 
-    path = "exports/garch_expert_preds.npz"
+    if path is None:
+        from data.pairs import checkpoint_dir
+        path = os.path.join(checkpoint_dir("XAU/USD"), "garch_expert_preds.npz")
     if not os.path.exists(path):
         print("[garch-expert] npz missing -- run `python build_garch_expert.py`; "
               "continuing WITHOUT the GARCH expert.")

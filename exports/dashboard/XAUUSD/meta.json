@@ -1,0 +1,71 @@
+{
+  "pair": "XAU/USD",
+  "slug": "XAUUSD",
+  "label": "Gold (XAU/USD)",
+  "seed": 9,
+  "saved_at": "2026-07-16T12:36:54",
+  "interval": "4h",
+  "feature_names": [
+    "ret_open",
+    "ret_high",
+    "ret_low",
+    "ret_close",
+    "rsi",
+    "macd_hist",
+    "bb_width",
+    "volume_z",
+    "atr_pct",
+    "roc_10",
+    "stoch_k",
+    "ema_ratio",
+    "drift_5",
+    "drift_21",
+    "drift_60",
+    "drift_tstat",
+    "rate_z21",
+    "yield_chg5",
+    "dollar_ret5",
+    "cpi_yoy",
+    "cpi_mom",
+    "days_since_cpi",
+    "sent_mean",
+    "sent_std",
+    "sent_min",
+    "sent_max",
+    "sent_decay",
+    "sent_momentum",
+    "sent_vol",
+    "sent_diffusion",
+    "headline_count_z",
+    "sig_buy",
+    "sig_sell",
+    "sig_hold",
+    "sig_none"
+  ],
+  "lookback": 60,
+  "horizon": 10,
+  "n_total": 35,
+  "bars": 8086,
+  "date_start": "2011-11-01 00:00:00",
+  "date_end": "2026-07-16 04:00:00",
+  "split": {
+    "train": 5600,
+    "val": 1212,
+    "test": 1202
+  },
+  "hybrid": {
+    "DirAcc": 0.5355241264559069,
+    "MAE": 0.013192660175263882,
+    "RMSE": 0.01977020502090454
+  },
+  "wf_expert_diracc": 0.5398502495840266,
+  "garch": {
+    "DirAcc": 0.535108153078203,
+    "MAE": 0.012424759677143814
+  },
+  "arima": {
+    "DirAcc": 0.4858569051580699,
+    "MAE": 0.012617867230610064
+  },
+  "n_params": 4401639
+}

@@ -24,6 +24,7 @@ import numpy as np
 
 from config import DATA_CFG
 from data.dataset import build_fx_panel, time_split
+from data.pairs import checkpoint_dir
 
 MIN_HISTORY = 250
 
@@ -65,7 +66,7 @@ def main():
                 print(f"[garch-expert] {k}/{len(todo)} done ({el/60:.1f} min, "
                       f"~{el/k*(len(todo)-k)/60:.0f} min left)")
 
-    out = "exports/garch_expert_preds.npz"
+    out = os.path.join(checkpoint_dir("XAU/USD"), "garch_expert_preds.npz")
     np.savez_compressed(out, origins=np.array(origins), preds=preds,
                         close_md5=hashlib.md5(close.tobytes()).hexdigest())
     nz = int((np.abs(preds).sum(axis=1) > 0).sum())

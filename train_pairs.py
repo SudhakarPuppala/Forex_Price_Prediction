@@ -60,20 +60,45 @@ def _garch_one(args):
         return t, np.zeros(horizon, dtype="float32")
 
 
-def garch_expert_for(panel, datasets, workers=6):
-    """Walk-forward GARCH forecasts for every origin (leakage-free per-origin
-    fits). Reuses the committed npz for gold via the hash-checked loader."""
-    cached = _load_garch_expert(panel)
+def garch_expert_for(panel, datasets, pair=None, workers=6, stride=10):
+    """Walk-forward GARCH forecasts (leakage-free per-origin fits). Reuses this
+    pair's committed npz (exports/dashboard/<slug>/) via the hash-checked loader.
+
+    For speed, the AR(1)-GARCH(1,1) is REFIT only every `stride` eligible
+    origins and its forecast is forward-filled to the intervening origins -- the
+    same approximation the ARIMA baseline uses. GARCH parameters and the
+    conditional-mean drift move slowly, so at H4 (~8k origins) this cuts the fit
+    count ~stride-fold (e.g. ~7800 -> ~780) with negligible directional impact,
+    while every fit still sees ONLY data before its origin (no look-ahead)."""
+    npz_path = (os.path.join(checkpoint_dir(pair), "garch_expert_preds.npz")
+                if pair is not None else None)
+    cached = _load_garch_expert(panel, npz_path)
     if cached is not None:
         return cached
     close = np.asarray(panel.close, dtype=np.float64)
     origins = sorted(set(t for ds in datasets for t in ds.indices))
-    todo = [(t, close, DATA_CFG.horizon) for t in origins if t + 1 >= MIN_HISTORY]
+    elig = [t for t in origins if t + 1 >= MIN_HISTORY]
+    fit_origins = elig[::stride]                       # refit points only
     by = {t: np.zeros(DATA_CFG.horizon, dtype="float32") for t in origins}
-    from multiprocessing import Pool
-    with Pool(workers) as pool:
-        for t, p in pool.imap_unordered(_garch_one, todo, chunksize=16):
-            by[t] = np.asarray(p, dtype="float32")
+    # SERIAL on purpose: with the stride each fit is ~0.1s and there are only
+    # ~len(elig)/stride of them (~80s total), so we avoid the Windows
+    # multiprocessing Pool entirely -- a spawned Pool previously hung for hours
+    # here. No parallelism needed at this fit count.
+    print(f"[train_pairs] GARCH walk-forward: {len(fit_origins)} serial fits "
+          f"(stride {stride} over {len(elig)} origins) ...")
+    fitted = {}
+    for i, t in enumerate(fit_origins):
+        _, p = _garch_one((t, close, DATA_CFG.horizon))
+        fitted[t] = np.asarray(p, dtype="float32")
+        if (i + 1) % 200 == 0:
+            print(f"[train_pairs]   GARCH {i + 1}/{len(fit_origins)} fits done", flush=True)
+    # forward-fill each eligible origin from the most recent refit at/before it
+    fit_set = set(fit_origins)
+    last = np.zeros(DATA_CFG.horizon, dtype="float32")
+    for t in elig:
+        if t in fit_set:
+            last = fitted.get(t, last)
+        by[t] = last
     return by
 
 
@@ -102,18 +127,20 @@ def arima_walk_forward(panel, test_ds, horizon, stride=5):
             "MAE": float(np.abs(yp - yt).mean())}
 
 
-def run_pair(pair: str) -> dict:
+def run_pair(pair: str, interval: str = "4h") -> dict:
     cfg = get_pair(pair)
-    print(f"\n===== {cfg.name} ({cfg.label}) =====")
+    print(f"\n===== {cfg.name} ({cfg.label}) @ {interval} =====")
     # Build from the pair's own real feeds (offline news = use the pair's
     # archive; news-less if none yet), then persist the pair's panel.
-    panel = build_fx_panel(pair=pair, n_days=10000, seed=SEED, source="real", real_interval="1d")
+    # interval="4h" pulls H4 candles from MT5 (2011->now, ~8k bars); "1d" keeps
+    # the legacy daily pipeline.
+    panel = build_fx_panel(pair=pair, n_days=10000, seed=SEED, source="real", real_interval=interval)
     save_panel_csv(panel, panel_csv_path(pair))
     tr, va, te = time_split(panel)
     print(f"[train_pairs] {cfg.slug}: {len(panel.close)} bars, "
           f"train={len(tr)} val={len(va)} test={len(te)}")
 
-    garch_by = garch_expert_for(panel, [tr, va, te])
+    garch_by = garch_expert_for(panel, [tr, va, te], pair=pair)
     _zero = np.zeros(DATA_CFG.horizon, dtype="float32")
 
     def _g(ds):
@@ -168,6 +195,7 @@ def run_pair(pair: str) -> dict:
     meta = {
         "pair": cfg.name, "slug": cfg.slug, "label": cfg.label,
         "seed": SEED, "saved_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        "interval": interval,
         "feature_names": list(panel.feature_names),
         "lookback": DATA_CFG.lookback, "horizon": DATA_CFG.horizon,
         "n_total": DATA_CFG.n_total_features,
@@ -192,11 +220,13 @@ def run_pair(pair: str) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pairs", nargs="+", default=ALL_PAIRS)
+    ap.add_argument("--interval", default="4h",
+                    help="candle interval: 4h (MT5 H4, default) or 1d (legacy daily)")
     args = ap.parse_args()
 
     summary = {}
     for pair in args.pairs:
-        summary[get_pair(pair).slug] = run_pair(pair)
+        summary[get_pair(pair).slug] = run_pair(pair, interval=args.interval)
     os.makedirs("exports/pair_metrics", exist_ok=True)
     json.dump(summary, open("exports/pair_metrics/all_pairs.json", "w"), indent=2, default=float)
     print("\n[train_pairs] wrote exports/pair_metrics/all_pairs.json")
