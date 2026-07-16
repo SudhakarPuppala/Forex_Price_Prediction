@@ -190,6 +190,8 @@ def build_fx_panel(
     real_interval: str = "1d",
     real_count: int = None,
     panel_csv: str = None,
+    export_artifacts: bool = True,
+    use_fetch_cache: bool = True,
 ) -> FXPanel:
     """Assemble the full multi-modal panel for one currency pair.
 
@@ -198,9 +200,19 @@ def build_fx_panel(
         is the model pipeline's input -- no live fetching, so training is
         fast, deterministic, and only ever sees data you have already
         inspected in the exported CSVs.
-    source="real": live Yahoo Finance / GDELT-archive / macro feeds, with a
-        synthetic fallback if unreachable.
+    source="real": live MT5 / GDELT-archive / macro feeds, with a synthetic
+        fallback if unreachable.
     source="synthetic": the signal-linked synthetic generator.
+
+    export_artifacts=False skips writing the intermediate/sentiment CSVs and
+        growing the price archive -- those exist for the DATA pipeline, not for
+        inference, and cost several MB of I/O per call. The live dashboard
+        passes False.
+    use_fetch_cache=False bypasses the process-level _REAL_FETCH_CACHE. That
+        cache is keyed only on (ticker, interval, count), so a long-lived
+        process (the dashboard) would otherwise keep serving the FIRST fetch of
+        the session forever -- stale for a "live" forecast. Callers that manage
+        their own freshness (keyed on the latest bar) pass False.
     """
     # Resolve the per-pair panel path (gold -> legacy exports/feature_panel.csv,
     # others -> exports/pairs/<slug>/feature_panel.csv) unless one was given.
@@ -214,14 +226,16 @@ def build_fx_panel(
         real_ticker = real_ticker or PAIR_TICKERS.get(pair, "GC=F")
         real_count = real_count or n_days
         cache_key = (real_ticker, real_interval, real_count)
-        if cache_key in _REAL_FETCH_CACHE:
+        if use_fetch_cache and cache_key in _REAL_FETCH_CACHE:
             real = _REAL_FETCH_CACHE[cache_key]
             print(f"[data] Reusing cached live fetch for {cache_key} (multi-seed run).")
         else:
             real = try_fetch_real_panel(ticker_symbol=real_ticker, interval=real_interval, count=real_count)
             if real is not None:
-                _REAL_FETCH_CACHE[cache_key] = real
-                _export_intermediates(real, pair=pair)
+                if use_fetch_cache:
+                    _REAL_FETCH_CACHE[cache_key] = real
+                if export_artifacts:
+                    _export_intermediates(real, pair=pair)
         if real is not None:
             ohlc = real["ohlc"]
             if real.get("macro") is not None:
@@ -237,7 +251,8 @@ def build_fx_panel(
                   f"price feed (MT5 live / yfinance fallback), "
                   f"{real['n_raw_headlines']} raw headlines (GDELT + RSS), macro: {macro_src}.")
             panel = _assemble_panel(ohlc, macro, news, source="real")
-            export_sentiment_features(panel, pair=pair)
+            if export_artifacts:
+                export_sentiment_features(panel, pair=pair)
             return panel
         else:
             warnings.warn(

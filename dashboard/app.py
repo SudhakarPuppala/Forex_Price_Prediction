@@ -145,6 +145,43 @@ def metric_card(col, label, value, color=NAVY, sub=""):
         f"<div style='color:{SLATE};font-size:11px'>{sub}</div></div>", unsafe_allow_html=True)
 
 
+def _latest_bar_key(pair: str, interval: str) -> str:
+    """Cheap (~1s) probe of the most recent bar's close time. Used as the cache
+    key for the expensive panel build below, so the panel is rebuilt ONLY when a
+    genuinely new bar has closed."""
+    try:
+        from data.mt5_feed import load_mt5_live
+        df = load_mt5_live(pair, interval, count=1)
+        if df is not None and len(df):
+            return str(df.index[-1])
+    except Exception:
+        pass
+    return "unknown"
+
+
+@st.cache_resource(show_spinner="Building the live feature panel (rebuilds only when a new bar closes) …")
+def _build_live_panel(pair: str, interval: str, bar_key: str, fetch_news: bool):
+    """Full-history panel for live inference, CACHED on the latest bar.
+
+    The full rebuild is deliberate, not waste: the sentiment buy/sell signals use
+    an EXPANDING causal z-score, so truncating history would change the final
+    60 bars' features and cause a train/serve mismatch. So rather than shorten
+    the history we (a) cache it per closed bar and (b) skip the artifact CSV
+    writes -- inference has no use for them. `bar_key` is part of the cache key;
+    a new bar invalidates it. use_fetch_cache=False keeps the process-level
+    fetch cache from pinning us to the session's first (stale) fetch.
+    """
+    from data.dataset import build_fx_panel
+    import os as _os
+    if fetch_news:
+        _os.environ.pop("FOREX_OFFLINE_NEWS", None)      # live news top-up (slow)
+    else:
+        _os.environ["FOREX_OFFLINE_NEWS"] = "1"          # cached archive (fast)
+    return build_fx_panel(pair=pair, n_days=10000, source="real",
+                          real_interval=interval,
+                          export_artifacts=False, use_fetch_cache=False)
+
+
 def compute_live_forecast(hybrid, xgb, pair="XAU/USD", fetch_news=False):
     """GENUINE out-of-sample forecast: fetch fresh live price + macro (yfinance),
     engineer the last 60-bar window, normalise with the training statistics, and
@@ -155,17 +192,13 @@ def compute_live_forecast(hybrid, xgb, pair="XAU/USD", fetch_news=False):
     fetch gap, is the limit). Set fetch_news=True to additionally pull fresh
     headlines live (GDELT + RSS), which is much slower (several minutes) due to
     GDELT rate-limits. Returns a rich dict for the in-depth view."""
-    import os as _os
-    from data.dataset import build_fx_panel
-    if fetch_news:
-        _os.environ.pop("FOREX_OFFLINE_NEWS", None)      # live news top-up (slow)
-    else:
-        _os.environ["FOREX_OFFLINE_NEWS"] = "1"          # cached archive (fast)
     # Match the interval the checkpoint was TRAINED on (H4 by default) -- feeding
     # a daily window to an H4-trained model would be a train/serve mismatch.
     _cmeta = load_json(os.path.join(checkpoint_dir(pair), "meta.json")) or {}
     _interval = _cmeta.get("interval", "4h")
-    fresh = build_fx_panel(pair=pair, n_days=10000, source="real", real_interval=_interval)
+    # Cached on the latest closed bar: the first click for a pair pays the full
+    # build; every click after that is instant until a new bar closes.
+    fresh = _build_live_panel(pair, _interval, _latest_bar_key(pair, _interval), fetch_news)
 
     panel = load_panel_and_splits(pair)[0]                   # committed panel -> train stats
     n = len(panel.close); train_end = int(n * DATA_CFG.train_frac)
