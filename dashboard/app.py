@@ -161,7 +161,11 @@ def compute_live_forecast(hybrid, xgb, pair="XAU/USD", fetch_news=False):
         _os.environ.pop("FOREX_OFFLINE_NEWS", None)      # live news top-up (slow)
     else:
         _os.environ["FOREX_OFFLINE_NEWS"] = "1"          # cached archive (fast)
-    fresh = build_fx_panel(pair=pair, n_days=10000, source="real", real_interval="1d")
+    # Match the interval the checkpoint was TRAINED on (H4 by default) -- feeding
+    # a daily window to an H4-trained model would be a train/serve mismatch.
+    _cmeta = load_json(os.path.join(checkpoint_dir(pair), "meta.json")) or {}
+    _interval = _cmeta.get("interval", "4h")
+    fresh = build_fx_panel(pair=pair, n_days=10000, source="real", real_interval=_interval)
 
     panel = load_panel_and_splits(pair)[0]                   # committed panel -> train stats
     n = len(panel.close); train_end = int(n * DATA_CFG.train_frac)
@@ -368,7 +372,7 @@ def show_layer_dialog(key):
 
 
 # ----------------------------- sidebar -----------------------------
-from data.pairs import PAIRS as _PAIRS, get_pair, checkpoint_dir
+from data.pairs import PAIRS as _PAIRS, get_pair, checkpoint_dir, DEFAULT_PAIR
 
 st.sidebar.title("📈 Decoding Currency Dynamics")
 st.sidebar.caption("Hybrid CNN-LSTM-Transformer · multi-currency multi-step forecasting")
@@ -707,7 +711,7 @@ elif page.startswith("🔮"):
     st.divider()
     st.subheader("🔮 FX Price Predict — live, out-of-sample")
     st.markdown(f"This runs the **model pipeline from the saved model on fresh data**: it fetches **live "
-                f"{PCFG.label} price and macro data** (and the latest cached news sentiment) for the last 60 trading "
+                f"{PCFG.label} price and macro data** (and the latest cached news sentiment) for the last 60 bars "
                 f"days, engineers the features, and forecasts the **next 10 trading days from today** — a genuine "
                 f"out-of-sample prediction (no actual to compare against yet).")
 
@@ -754,7 +758,7 @@ elif page.startswith("🔮"):
         lf.add_trace(go.Scatter(x=np.r_[0, h], y=np.r_[F["last_close"], price_path],
                                 name="predicted price", line=dict(color=GREEN, width=3)))
         lf.update_layout(height=320, template="plotly_white", margin=dict(l=0, r=0, t=10, b=0),
-                         xaxis_title="trading days ahead", yaxis_title=f"{PCFG.name} price")
+                         xaxis_title="bars ahead", yaxis_title=f"{PCFG.name} price")
         st.plotly_chart(lf, use_container_width=True)
         d1 = "BUY" if fc[0] > 0 else "SELL"
         cc = st.columns(3)
@@ -768,12 +772,12 @@ elif page.startswith("🔮"):
 
         # ---------- 📥 INPUT DATA USED ----------
         st.divider()
-        st.subheader("📥 Input data used for this prediction (last 60 trading days)")
+        st.subheader("📥 Input data used for this prediction (last 60 bars)")
         wds, wcl, wraw = F.get("window_dates"), F.get("window_close"), F.get("window_raw")
         if wds and wcl is not None:
             pf = go.Figure(go.Scatter(x=wds, y=wcl, line=dict(color=TEAL, width=2), name="close"))
             pf.update_layout(height=250, template="plotly_white", margin=dict(l=0, r=0, t=10, b=0),
-                             yaxis_title=f"{PCFG.name} close", xaxis_title="last 60 trading days (live)")
+                             yaxis_title=f"{PCFG.name} close", xaxis_title="last 60 bars (live)")
             st.plotly_chart(pf, use_container_width=True)
             with st.expander("📈 Live FX rates — last 60 days (table, newest first)"):
                 st.dataframe(pd.DataFrame({"date": wds, "close": np.round(wcl, 2)}).iloc[::-1],
@@ -919,16 +923,73 @@ elif page.startswith("🔮"):
 
 # ===================== 5. RESULTS & BASELINES =====================
 elif page.startswith("📈"):
-    st.title("📈 Results & Baselines")
+    st.title(f"📈 Results & Baselines — {PCFG.emoji} {PCFG.label}")
     hc, rc = st.columns([4, 1])
-    hc.caption(f"Live from the latest committed benchmark · `multi_seed_summary.json` updated "
-               f"**{file_mtime('multi_seed_summary.json')}**. Re-run `python run_multi_seed.py --source panel` "
-               f"to refresh the numbers, then reload.")
+    _pm_path = os.path.join("exports", "pair_metrics", f"{PCFG.slug}.json")
+    hc.caption(f"Per-pair train/test metrics from `{_pm_path}` "
+               f"(updated **{file_mtime(_pm_path)}**). Re-run "
+               f"`python train_pairs.py --pairs {PAIR}` to refresh, then reload.")
     if rc.button("🔄 Refresh", use_container_width=True):
         st.cache_resource.clear(); st.rerun()
-    if not summ:
-        st.error("multi_seed_summary.json not found — run `python run_multi_seed.py --source panel`.")
+
+    # ---- PER-PAIR results (renders for EVERY currency pair) ----
+    # Prefer the standalone pair_metrics file; fall back to the checkpoint meta
+    # (train_pairs.py writes the same schema to both).
+    pm = load_json(_pm_path) or (meta if (meta and "hybrid" in meta) else None)
+    if not pm or "hybrid" not in pm:
+        st.warning(f"No train/test metrics for {PCFG.label} yet — "
+                   f"run `python train_pairs.py --pairs {PAIR}`.")
     else:
+        n_test = pm.get("split", {}).get("test", "?")
+        seed = pm.get("seed", 9)
+        hyb, hyb_mae = pm["hybrid"]["DirAcc"], pm["hybrid"]["MAE"]
+        hyb_rmse = pm["hybrid"].get("RMSE")
+        garch = (pm.get("garch") or {}).get("DirAcc")
+        arima = (pm.get("arima") or {}).get("DirAcc") if pm.get("arima") else None
+        wf = pm.get("wf_expert_diracc")
+        mc = st.columns(4)
+        metric_card(mc[0], "Hybrid Directional Acc.", f"{hyb:.3f}", TEAL,
+                    f"seed {seed} · {n_test} test windows")
+        metric_card(mc[1], "WF-XGBoost expert", f"{wf:.3f}" if wf is not None else "—",
+                    GREEN, "pair-local walk-forward")
+        metric_card(mc[2], "GARCH baseline", f"{garch:.3f}" if garch is not None else "—",
+                    NAVY, "AR(1)-GARCH(1,1)")
+        metric_card(mc[3], "Hybrid MAE", f"{hyb_mae:.4f}",
+                    GREEN, f"RMSE {hyb_rmse:.4f}" if hyb_rmse else "lowest error")
+        rows = [{"Model": "Hybrid CNN-LSTM-Transformer", "DirAcc": round(hyb, 4),
+                 "MAE": round(hyb_mae, 5), "RMSE": round(hyb_rmse, 5) if hyb_rmse else None}]
+        if wf is not None:
+            rows.append({"Model": "WF-XGBoost expert (pair-local)", "DirAcc": round(wf, 4),
+                         "MAE": None, "RMSE": None})
+        if garch is not None:
+            rows.append({"Model": "GARCH (AR1-GARCH1,1)", "DirAcc": round(garch, 4),
+                         "MAE": round(pm["garch"]["MAE"], 5) if pm.get("garch", {}).get("MAE") else None,
+                         "RMSE": None})
+        if arima is not None:
+            rows.append({"Model": "ARIMA (walk-forward)", "DirAcc": round(arima, 4),
+                         "MAE": round(pm["arima"]["MAE"], 5) if pm.get("arima", {}).get("MAE") else None,
+                         "RMSE": None})
+        dfp = pd.DataFrame(rows).sort_values("DirAcc", ascending=False, na_position="last")
+        st.subheader(f"Train/test comparison — {n_test} test windows (seed {seed})")
+        st.dataframe(dfp, use_container_width=True, hide_index=True)
+        cfig = go.Figure()
+        palette = [TEAL, GREEN, NAVY, SLATE]
+        cfig.add_trace(go.Bar(x=[r["Model"] for r in rows], y=[r["DirAcc"] for r in rows],
+                              marker_color=palette[:len(rows)]))
+        cfig.add_hline(y=0.5, line_dash="dot", line_color=SLATE, annotation_text="coin flip")
+        _ymax = max(0.60, max(r["DirAcc"] for r in rows) + 0.02)
+        cfig.update_layout(height=320, template="plotly_white", yaxis_title="Directional accuracy",
+                           yaxis_range=[0.45, _ymax], margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(cfig, use_container_width=True)
+        st.caption(f"Data window {pm.get('date_start','?')} → {pm.get('date_end','?')} · "
+                   f"{pm.get('bars','?')} bars · {pm.get('n_params', 0):,} params · "
+                   f"lookback {pm.get('lookback','?')} / horizon {pm.get('horizon','?')} bars.")
+
+    # ---- GOLD deep-dive: 3-seed stability, TGC, ablation, cross-pair ----
+    # These are gold-specific project analyses (run_multi_seed.py / roadmap).
+    if PCFG.name == DEFAULT_PAIR and summ:
+        st.divider()
+        st.subheader("🥇 Gold deep-dive — 3-seed stability, Trend-Gated Committee, ablation")
         n_test = (meta.get("split", {}).get("test") if meta else None) or 962
         hyb = summ["Hybrid_CNN_LSTM_Transformer"]["DirectionalAccuracy"]["mean"]
         garch = summ.get("GARCH", {}).get("DirectionalAccuracy", {}).get("mean")

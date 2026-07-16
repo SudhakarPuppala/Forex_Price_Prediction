@@ -23,6 +23,9 @@ import xgboost  # noqa: F401
 import numpy as np
 
 from main import run as run_pipeline
+from data.pairs import panel_csv_path
+
+GOLD_PANEL = panel_csv_path("XAU/USD")   # exports/pairs/XAUUSD/feature_panel.csv
 
 
 def build_seed_ensemble(seeds, model="Hybrid_CNN_LSTM_Transformer"):
@@ -137,10 +140,10 @@ def build_trend_gated_committee(seeds, model="Hybrid_CNN_LSTM_Transformer"):
             return None
         frames.append(pd.read_csv(p))
     gp = f"exports/predictions_test_GARCH_seed{seeds[0]}.csv"
-    if not (os.path.exists(gp) and os.path.exists("exports/feature_panel.csv")):
+    if not (os.path.exists(gp) and os.path.exists(GOLD_PANEL)):
         return None
     g = pd.read_csv(gp)
-    panel = pd.read_csv("exports/feature_panel.csv")
+    panel = pd.read_csv(GOLD_PANEL)
     if "drift_tstat" not in panel.columns or len(g) != len(frames[0]):
         return None
 
@@ -320,7 +323,7 @@ if __name__ == "__main__":
         import os
         import sys
 
-        panel_path = "exports/feature_panel.csv"
+        panel_path = GOLD_PANEL
         if not os.path.exists(panel_path):
             sys.exit(f"[gate] No feature panel at {panel_path}. Run PIPELINE 1 first:\n"
                      f"       python build_dataset.py\n"

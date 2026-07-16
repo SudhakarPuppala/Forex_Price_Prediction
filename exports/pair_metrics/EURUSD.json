@@ -2,27 +2,70 @@
   "pair": "EUR/USD",
   "slug": "EURUSD",
   "label": "Euro (EUR/USD)",
-  "bars": 5869,
-  "date_start": "2003-12-01 00:00:00+00:00",
-  "date_end": "2026-07-15 00:00:00+01:00",
+  "seed": 9,
+  "saved_at": "2026-07-16T14:06:27",
+  "interval": "4h",
+  "feature_names": [
+    "ret_open",
+    "ret_high",
+    "ret_low",
+    "ret_close",
+    "rsi",
+    "macd_hist",
+    "bb_width",
+    "volume_z",
+    "atr_pct",
+    "roc_10",
+    "stoch_k",
+    "ema_ratio",
+    "drift_5",
+    "drift_21",
+    "drift_60",
+    "drift_tstat",
+    "rate_z21",
+    "yield_chg5",
+    "dollar_ret5",
+    "cpi_yoy",
+    "cpi_mom",
+    "days_since_cpi",
+    "sent_mean",
+    "sent_std",
+    "sent_min",
+    "sent_max",
+    "sent_decay",
+    "sent_momentum",
+    "sent_vol",
+    "sent_diffusion",
+    "headline_count_z",
+    "sig_buy",
+    "sig_sell",
+    "sig_hold",
+    "sig_none"
+  ],
+  "lookback": 60,
+  "horizon": 10,
+  "n_total": 35,
+  "bars": 8077,
+  "date_start": "2011-11-22 00:00:00",
+  "date_end": "2026-07-16 08:00:00",
   "split": {
-    "train": 4048,
-    "val": 879,
-    "test": 870
+    "train": 5593,
+    "val": 1211,
+    "test": 1201
   },
   "hybrid": {
-    "DirAcc": 0.5032183908045977,
-    "MAE": 0.007733614649623632,
-    "RMSE": 0.010282333940267563
+    "DirAcc": 0.611157368859284,
+    "MAE": 0.002293311757966876,
+    "RMSE": 0.0031391505617648363
   },
-  "wf_expert_diracc": 0.5718390804597702,
+  "wf_expert_diracc": 0.6575353871773522,
   "garch": {
-    "DirAcc": 0.4827586206896552,
-    "MAE": 0.007235736137286142
+    "DirAcc": 0.4957535387177352,
+    "MAE": 0.002460110065053094
   },
   "arima": {
-    "DirAcc": 0.49770114942528737,
-    "MAE": 0.007333835339181174
+    "DirAcc": 0.4957535387177352,
+    "MAE": 0.0024561823642744547
   },
   "n_params": 4401639
 }

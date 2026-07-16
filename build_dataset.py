@@ -29,6 +29,7 @@ import numpy as np
 
 from config import DATA_CFG
 from data.dataset import build_fx_panel, save_panel_csv, time_split, PAIR_TICKERS
+from data.pairs import panel_csv_path
 
 
 def _pct(x):
@@ -101,8 +102,10 @@ def main():
     ap.add_argument("--pair", default="XAU/USD")
     ap.add_argument("--interval", default="1d")
     ap.add_argument("--n_days", type=int, default=10000)
-    ap.add_argument("--out", default="exports/feature_panel.csv")
+    ap.add_argument("--out", default=None,
+                    help="panel output path (default: exports/pairs/<slug>/feature_panel.csv)")
     args = ap.parse_args()
+    out = args.out or panel_csv_path(args.pair)
 
     print(f"=== PIPELINE 1: building dataset for {args.pair} "
           f"(ticker {PAIR_TICKERS.get(args.pair, '?')}, interval {args.interval}) ===")
@@ -111,7 +114,7 @@ def main():
     panel = build_fx_panel(pair=args.pair, source="real", n_days=args.n_days,
                            real_interval=args.interval)
 
-    path = save_panel_csv(panel, args.out)
+    path = save_panel_csv(panel, out)
     print(f"\n[pipeline1] feature panel written to {path} "
           f"({len(panel.close)} bars x {panel.features.shape[1]} features)")
 

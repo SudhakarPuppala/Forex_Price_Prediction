@@ -7,17 +7,17 @@ keyed off a PairConfig here, so building/analysing XAG/USD (silver) or
 EUR/USD (euro) NEVER overwrites gold's raw files -- each pair owns its own
 prices, news, macro, sentiment and feature-panel artifacts.
 
-File layout (per pair, under exports/):
-    feature panel   XAU/USD -> feature_panel.csv               (legacy path, gold)
-                    others  -> pairs/<slug>/feature_panel.csv
-    intermediates   XAU/USD -> fx_prices_yfinance.csv, ...      (legacy top-level)
-                    others  -> pairs/<slug>/<name>.csv
-    news archive    -> archive/news_<tickersafe>.csv            (already per-ticker)
+File layout (UNIFORM per pair, under exports/):
+    feature panel   pairs/<slug>/feature_panel.csv
+    intermediates   pairs/<slug>/fx_prices_yfinance.csv, news_headlines_scored.csv,
+                    macro_fred.csv, sentiment_features_per_bar.csv
+    checkpoint      dashboard/<slug>/{hybrid.pt, xgb.pkl, meta.json, garch_expert_preds.npz}
+    news archive    archive/news_<tickersafe>.csv               (per-ticker, shared infra)
 
-Gold keeps its historical top-level paths so existing checkpoints, the
-committed panel and older tooling keep working unchanged; silver and euro
-are cleanly separated. `panel_csv_path()` / `intermediate_path()` are the
-helpers the data layer and dashboard call.
+Every pair -- gold included -- is namespaced under its own <slug> directory so
+the layout is clean and no cross-pair build can clobber another pair's files.
+`panel_csv_path()` / `intermediate_path()` / `checkpoint_dir()` are the helpers
+the data layer, training and dashboard call.
 """
 from __future__ import annotations
 
@@ -146,28 +146,21 @@ def pair_dir(pair: str, exports_dir: str = "exports") -> str:
 
 
 def panel_csv_path(pair: str, exports_dir: str = "exports") -> str:
-    """Feature-panel path for a pair. Gold keeps the legacy top-level path
-    (backward-compat with the committed panel + existing checkpoints); other
-    pairs live under exports/pairs/<slug>/."""
-    if get_pair(pair).name == DEFAULT_PAIR:
-        return os.path.join(exports_dir, "feature_panel.csv")
+    """Feature-panel path for a pair. EVERY pair (incl. gold) lives under
+    exports/pairs/<slug>/ for a uniform, clean layout."""
     return os.path.join(pair_dir(pair, exports_dir), "feature_panel.csv")
 
 
 def intermediate_path(pair: str, name: str, exports_dir: str = "exports") -> str:
-    """Path for an intermediate CSV (prices/news/macro/sentiment). Gold keeps
-    its legacy top-level filename; other pairs are namespaced under their
-    per-pair directory so they never clobber gold's raw extracts."""
-    if get_pair(pair).name == DEFAULT_PAIR:
-        return os.path.join(exports_dir, name)
+    """Path for an intermediate CSV (prices/news/macro/sentiment), namespaced
+    per pair under exports/pairs/<slug>/ so a cross-pair build never clobbers
+    another pair's raw extracts."""
     return os.path.join(pair_dir(pair, exports_dir), name)
 
 
 def checkpoint_dir(pair: str, base: str = "exports/dashboard") -> str:
-    """Per-pair saved-model directory. Gold keeps exports/dashboard/ (legacy);
-    others get exports/dashboard/<slug>/."""
-    if get_pair(pair).name == DEFAULT_PAIR:
-        return base
+    """Per-pair saved-model directory: exports/dashboard/<slug>/ for every pair
+    (gold included)."""
     d = os.path.join(base, get_pair(pair).slug)
     os.makedirs(d, exist_ok=True)
     return d

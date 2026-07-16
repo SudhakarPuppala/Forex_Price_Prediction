@@ -11,6 +11,11 @@ __pycache__/
 # Microsoft Office lock files (created while a document is open)
 ~$*
 
+# MT5 broker credentials / connection overrides -- NEVER commit these.
+config/mt5.yaml
+config/mt5_*.yaml
+exports/mt5/
+
 # Benchmark reports under report/ are tracked deliberately: they are the
 # recorded evidence for each evaluation round.
 dashboard/__pycache__/
