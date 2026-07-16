@@ -877,15 +877,40 @@ def try_fetch_real_panel(ticker_symbol: str = "GC=F", interval: str = "5m", coun
     ohlc = None
     if cfg is not None and os.environ.get("FOREX_NO_MT5") != "1":
         from data.mt5_feed import load_mt5_live, load_mt5_ohlc
-        ohlc = load_mt5_live(cfg.name, interval, count=count)
-        if ohlc is None:
+        # FOREX_PRICE_SOURCE: csv | live | auto (default).
+        #   csv  -- the curated terminal export (exports/pairs/<SLUG>/<SLUG>_H1.CSV).
+        #           REQUIRED for historical H1 builds: the broker's live API only
+        #           holds genuine intraday from 2023-01-03 and silently returns
+        #           DAILY bars for older intraday requests, whereas the export has
+        #           genuine hourly back to 2010.
+        #   live -- the attached terminal (fresh bars; what live inference wants).
+        #   auto -- live first, CSV as fallback.
+        src = os.environ.get("FOREX_PRICE_SOURCE", "auto").lower()
+        if src == "csv":
             ohlc = load_mt5_ohlc(cfg.name, interval)
-            if ohlc is not None and count:
-                ohlc = ohlc.tail(int(count))
+        elif src == "live":
+            ohlc = load_mt5_live(cfg.name, interval, count=count)
+        else:
+            ohlc = load_mt5_live(cfg.name, interval, count=count)
+            if ohlc is None:
+                ohlc = load_mt5_ohlc(cfg.name, interval)
+        if ohlc is not None and count and len(ohlc) > int(count):
+            ohlc = ohlc.tail(int(count))
     if ohlc is None:
         ohlc = fetch_gold_candles(ticker_symbol=ticker_symbol, interval=interval, count=count)
     if ohlc is None or ohlc.empty:
         return None
+
+    # FOREX_PANEL_START: drop bars before this date. Prices reach 2010 but the
+    # news archive starts 2016, so 2010-2015 bars are sentiment-dead and drag
+    # coverage under the 50% target (silver: 33% from 2010 vs 52% from 2016).
+    _start = os.environ.get("FOREX_PANEL_START")
+    if _start:
+        before = len(ohlc)
+        ohlc = ohlc[ohlc.index >= pd.Timestamp(_start)]
+        print(f"[real_data_feed] panel start {_start}: kept {len(ohlc):,}/{before:,} bars.")
+        if ohlc.empty:
+            return None
 
     # Interval-aware news depth. Daily bars now reach ~5 years back (1825
     # days) so news covers the entire out-of-sample TEST window (the last
@@ -896,7 +921,17 @@ def try_fetch_real_panel(ticker_symbol: str = "GC=F", interval: str = "5m", coun
         align_hours = 6.0
     elif interval.endswith("h"):
         gdelt_days, gdelt_window = 730, 30
-        align_hours = 6.0
+        # Hourly bars: a 24h trailing window. Measured sentiment coverage on the
+        # 2016+ H1 panels (bars with >=1 headline in the window):
+        #     window:   6h    12h   24h   48h
+        #     gold      27%   50%   88%   95%
+        #     silver    14%   28%   52%   62%
+        #     euro      18%   35%   66%   81%
+        # The old 6h left every pair far under the 50% target -- news is simply
+        # not published hourly. 24h is still 7x tighter than the daily pipeline's
+        # 168h window, and strictly trailing (no look-ahead): a bar may only
+        # inherit news published BEFORE it. FOREX_ALIGN_HOURS overrides.
+        align_hours = float(os.environ.get("FOREX_ALIGN_HOURS", 24.0))
     else:
         # 45-day windows over 5 years = ~40 GDELT requests (vs ~60 at
         # 30-day), cutting rate-limit exposure while GDELT's 250-record cap
