@@ -728,8 +728,14 @@ def fetch_real_macro(bar_index: pd.DatetimeIndex, timeout: int = 30) -> Optional
             idx >= 0, (bar_d - cpi_dates[np.clip(idx, 0, None)]).astype(int), 60
         )
         days_since = np.clip(days_since, 0, 60) / 60.0
-        cpi_yoy_bars = ffill_onto_bars(cpi_yoy)
-        cpi_mom_bars = ffill_onto_bars(cpi_mom)
+        # BLS dates each CPI print to the month it MEASURES but publishes it
+        # ~6 weeks later, so using month M's value from M-01 onwards is
+        # look-ahead. shift(1) on the monthly index withholds it until the next
+        # month, approximating the release lag. (The leak scanner measured no
+        # exploitable signal here -- unlike dollar_ret5 -- but it is still
+        # information the model could not have had at the time.)
+        cpi_yoy_bars = ffill_onto_bars(cpi_yoy.shift(1))
+        cpi_mom_bars = ffill_onto_bars(cpi_mom.shift(1))
     else:
         # CPI unavailable -> neutral (constant 0) CPI features; real market
         # macro below is unaffected.
@@ -747,13 +753,32 @@ def fetch_real_macro(bar_index: pd.DatetimeIndex, timeout: int = 30) -> Optional
     #   dollar_ret5 -- 5-day log-return of the dollar index
     #   cpi_yoy / cpi_mom are already rates of change (stationary)
     #   days_since_cpi is already scaled continuously to [0, 1]
-    rate = pd.Series(ffill_onto_bars(series["rate_level"]), index=bar_index)
-    yld = pd.Series(ffill_onto_bars(series["yield_10y"]), index=bar_index)
-    dxy = pd.Series(ffill_onto_bars(series["dollar_index"]), index=bar_index)
+    # LOOK-AHEAD FIX (2026-07-17). These transforms used to be computed on the
+    # BAR index after forward-filling, which was wrong twice over at intraday
+    # resolution:
+    #   1. LEAK. The macro series are DAILY and dated at each day's CLOSE, and
+    #      ffill_onto_bars normalises a bar to its own day -- so the 01:00 bar
+    #      on day D received day D's CLOSING dollar/yield. That is information
+    #      from the end of the very day the model is forecasting. DXY is ~57%
+    #      euro by weight, so EUR/USD effectively saw its own day-close and
+    #      scored a fake 0.62 DirAcc (vs a 49.6% base rate); measured
+    #      corr(dollar_ret5, log(day_close/bar_close)) was -0.52.
+    #   2. WRONG UNITS. rolling(21)/diff(5)/shift(5) counted BARS, so at H1 they
+    #      meant 21 hours / 5 hours -- not the intended 21 days / 5 days -- over a
+    #      series that only changes once a day (dollar_ret5 was ~0 within a day
+    #      with a jump at the boundary).
+    # Both are fixed by computing on the DAILY series (correct day semantics)
+    # and shifting ONE DAY before mapping onto bars, so a bar on day D can only
+    # ever see day D-1's close.
+    rl, yl_, dx = series["rate_level"], series["yield_10y"], series["dollar_index"]
+    rate_z21_d = ((rl - rl.rolling(21, min_periods=5).mean())
+                  / (rl.rolling(21, min_periods=5).std() + 1e-6))
+    yield_chg5_d = yl_.diff(5)
+    dollar_ret5_d = np.log(dx / dx.shift(5))
 
-    rate_z21 = (rate - rate.rolling(21, min_periods=5).mean()) / (rate.rolling(21, min_periods=5).std() + 1e-6)
-    yield_chg5 = yld.diff(5)
-    dollar_ret5 = np.log(dxy / dxy.shift(5))
+    rate_z21 = ffill_onto_bars(rate_z21_d.shift(1))
+    yield_chg5 = ffill_onto_bars(yield_chg5_d.shift(1))
+    dollar_ret5 = ffill_onto_bars(dollar_ret5_d.shift(1))
 
     macro = pd.DataFrame(
         {

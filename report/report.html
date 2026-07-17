@@ -27,14 +27,14 @@ cross-pair transfer); Section 9 concludes.</p>
 <h2>1. Raw FX data from yfinance</h2>
 <p>Prices are fetched live from Yahoo Finance via the <code>yfinance</code> package
 (<code>data/real_data_feed.py:fetch_gold_candles</code>): ticker <b>GC=F</b> (COMEX gold futures,
-the standard XAU/USD proxy), <b>daily</b> candles. Daily runs fetch the
+the standard XAU/USD proxy), <b>60-minute</b> candles. Daily runs fetch the
 <b>full listed history</b> (intraday intervals are capped by Yahoo at 60 trailing days),
-giving <b>300 candles spanning 1.2 years</b> — the "more history"
+giving <b>62,049 candles spanning 10.5 years</b> — the "more history"
 roadmap item. Each candle carries OHLCV — open, high, low, close, volume — indexed by
 exchange timestamp. Full extract: <code>exports/fx_prices_yfinance.csv</code>.</p>
-<p><b>Data span:</b> 2025-05-20 00:00:00 → 2026-07-16 00:00:00 ·
-<b>close range:</b> 3274.57 – 5417.69 USD ·
-<b>mean bar-to-bar move:</b> 1.141%</p>
+<p><b>Data span:</b> 2016-01-04 01:00:00 → 2026-07-16 20:00:00 ·
+<b>close range:</b> 1063.05 – 5562.51 USD ·
+<b>mean bar-to-bar move:</b> 0.129%</p>
 <p><b>Latest sample records:</b></p>
 <table class="dataframe">
   <thead>
@@ -49,52 +49,52 @@ exchange timestamp. Full extract: <code>exports/fx_prices_yfinance.csv</code>.</
   </thead>
   <tbody>
     <tr>
-      <td>2026-07-09</td>
-      <td>4078.44</td>
-      <td>4138.13</td>
-      <td>4054.26</td>
-      <td>4123.74</td>
-      <td>376339</td>
+      <td>2026-07-16 15:00:00</td>
+      <td>4038.36</td>
+      <td>4043.27</td>
+      <td>3990.34</td>
+      <td>3992.24</td>
+      <td>32239</td>
     </tr>
     <tr>
-      <td>2026-07-10</td>
-      <td>4125.33</td>
-      <td>4134.87</td>
-      <td>4072.85</td>
-      <td>4119.33</td>
-      <td>329433</td>
+      <td>2026-07-16 16:00:00</td>
+      <td>3992.25</td>
+      <td>4008.30</td>
+      <td>3973.57</td>
+      <td>3990.03</td>
+      <td>41864</td>
     </tr>
     <tr>
-      <td>2026-07-13</td>
-      <td>4104.41</td>
-      <td>4106.59</td>
-      <td>3986.58</td>
-      <td>4001.03</td>
-      <td>511863</td>
+      <td>2026-07-16 17:00:00</td>
+      <td>3989.98</td>
+      <td>4005.50</td>
+      <td>3986.98</td>
+      <td>3997.74</td>
+      <td>38835</td>
     </tr>
     <tr>
-      <td>2026-07-14</td>
-      <td>4002.18</td>
-      <td>4104.25</td>
-      <td>3983.43</td>
-      <td>4052.88</td>
-      <td>458184</td>
+      <td>2026-07-16 18:00:00</td>
+      <td>3997.74</td>
+      <td>4016.84</td>
+      <td>3989.32</td>
+      <td>4006.95</td>
+      <td>30586</td>
     </tr>
     <tr>
-      <td>2026-07-15</td>
-      <td>4056.89</td>
-      <td>4081.26</td>
-      <td>4017.45</td>
-      <td>4060.48</td>
-      <td>433941</td>
+      <td>2026-07-16 19:00:00</td>
+      <td>4006.95</td>
+      <td>4007.63</td>
+      <td>3982.33</td>
+      <td>3992.03</td>
+      <td>26610</td>
     </tr>
     <tr>
-      <td>2026-07-16</td>
-      <td>4062.13</td>
-      <td>4066.37</td>
-      <td>3973.69</td>
-      <td>3987.62</td>
-      <td>362838</td>
+      <td>2026-07-16 20:00:00</td>
+      <td>3992.03</td>
+      <td>3992.97</td>
+      <td>3979.95</td>
+      <td>3986.31</td>
+      <td>23383</td>
     </tr>
   </tbody>
 </table>
@@ -110,8 +110,8 @@ gold/bullion lane — plus the <b>GDELT DOC 2.0 API</b> in date-bounded slices, 
 <b>RSS feeds</b> (Investing.com commodities/forex, FXStreet gold) for the freshest items.
 The resumable backfill (<code>build_news_archive_gnews.py</code>: monthly windows over
 2018–2022, 10-day windows across the walk-forward test span) grew the archive to
-<b>19,195 unique gold-relevant headlines</b>
-(2018-01-01 → 2026-07-15), lifting test-set
+<b>22,200 unique gold-relevant headlines</b>
+(2016-01-01 → 2026-07-16), lifting test-set
 sentiment coverage from 18% to <b>100%</b> — every test bar carries real news.</p>
 <p>Each headline is scored <b>once</b> (cached; never re-scored) by
 <b>real FinBERT (ProsusAI/finbert)</b>,
@@ -136,46 +136,46 @@ Full scored table: <code>exports/news_headlines_scored.csv</code>.</p>
   </thead>
   <tbody>
     <tr>
-      <td>2026-07-15 14:13:00</td>
-      <td>Gold Price Analysis – Can Gold Hold $4,000 Support Amid Death Cross Risk?</td>
+      <td>2026-07-16 04:51:47</td>
+      <td>Gold Rate Today, July 16, 2026: Gold Prices Increase Rs 790 per 10 gram in India</td>
+      <td>0.752</td>
+      <td>0.752</td>
+    </tr>
+    <tr>
+      <td>2026-07-16 05:00:30</td>
+      <td>Gold price in Philippines: Rates on July 16</td>
       <td>0.000</td>
-      <td>0.907</td>
+      <td>0.924</td>
     </tr>
     <tr>
-      <td>2026-07-15 14:14:35</td>
-      <td>US Dollar: Limited downside after CPI – BBH</td>
-      <td>-0.515</td>
-      <td>0.515</td>
+      <td>2026-07-16 05:09:38</td>
+      <td>Gold Price Slump and Strong Dollar Cap Copper Gains Despite Improved Auto Demand</td>
+      <td>0.652</td>
+      <td>0.652</td>
     </tr>
     <tr>
-      <td>2026-07-15 14:29:41</td>
-      <td>BoC's Macklem: Economic growth looks to have resumed in Canada</td>
-      <td>-0.689</td>
-      <td>0.689</td>
+      <td>2026-07-16 05:13:27</td>
+      <td>Gold prices fall to $4,033.12 as energy-driven inflation fears raise Fed rate hi</td>
+      <td>-0.918</td>
+      <td>0.918</td>
     </tr>
     <tr>
-      <td>2026-07-15 14:29:47</td>
-      <td>Fed’s Williams: June CPI consistent with progress on inflation</td>
-      <td>0.600</td>
-      <td>0.600</td>
+      <td>2026-07-16 05:36:48</td>
+      <td>Gold prices rise, silver prices dip in domestic market today</td>
+      <td>-0.625</td>
+      <td>0.625</td>
     </tr>
     <tr>
-      <td>2026-07-15 14:55:22</td>
-      <td>Fed Chair Warsh: One-time change in prices isn't necessarily inflationary</td>
-      <td>-0.553</td>
-      <td>0.553</td>
-    </tr>
-    <tr>
-      <td>2026-07-15 14:59:28</td>
-      <td>BoC's Macklem: Canada Q2 is looking pretty solid</td>
-      <td>-0.597</td>
-      <td>0.597</td>
+      <td>2026-07-16 06:19:29</td>
+      <td>Gold price rises by Rs 400 per tola, silver declines</td>
+      <td>-0.734</td>
+      <td>0.734</td>
     </tr>
   </tbody>
 </table>
-<p><b>Output analysis:</b> polarity mean -0.076, std 0.501,
+<p><b>Output analysis:</b> polarity mean -0.077, std 0.495,
 range -0.98 … +0.96.
-Class balance: <b>17% positive</b>, <b>59% neutral</b>, <b>25% negative</b> —
+Class balance: <b>16% positive</b>, <b>60% neutral</b>, <b>24% negative</b> —
 a healthy two-sided distribution (a lexicon fallback typically collapses to mostly-neutral;
 the wide spread here is the FinBERT signature). The near-zero mean says the news window
 carried no persistent directional bias over the covered period, so any model edge must come from
@@ -247,99 +247,99 @@ information than "neutral news".</td></tr>
   </thead>
   <tbody>
     <tr>
-      <td>2026-07-10</td>
-      <td>0.0114</td>
-      <td>-0.0008</td>
-      <td>0.0046</td>
-      <td>-0.0011</td>
-      <td>0.4456</td>
-      <td>0.0048</td>
-      <td>0.0928</td>
-      <td>-1.0863</td>
-      <td>0.0248</td>
-      <td>0.0093</td>
-      <td>0.6789</td>
-      <td>-0.0162</td>
-      <td>-0.0027</td>
-      <td>-0.0010</td>
-      <td>-0.0027</td>
-      <td>-0.0755</td>
-    </tr>
-    <tr>
-      <td>2026-07-13</td>
-      <td>-0.0051</td>
-      <td>-0.0069</td>
-      <td>-0.0214</td>
-      <td>-0.0291</td>
-      <td>0.4220</td>
-      <td>0.0031</td>
-      <td>0.0877</td>
-      <td>0.8379</td>
-      <td>0.0260</td>
-      <td>-0.0039</td>
-      <td>0.2251</td>
-      <td>-0.0173</td>
-      <td>-0.0080</td>
-      <td>-0.0025</td>
-      <td>-0.0031</td>
-      <td>-0.1654</td>
-    </tr>
-    <tr>
-      <td>2026-07-14</td>
-      <td>-0.0252</td>
+      <td>2026-07-16</td>
+      <td>-0.0115</td>
+      <td>-0.0087</td>
+      <td>-0.0042</td>
       <td>-0.0006</td>
+      <td>0.1950</td>
+      <td>-0.0012</td>
+      <td>0.0190</td>
+      <td>2.2682</td>
+      <td>0.0041</td>
+      <td>-0.0115</td>
+      <td>0.1881</td>
+      <td>-0.0023</td>
+      <td>-0.0023</td>
       <td>-0.0008</td>
-      <td>0.0129</td>
-      <td>0.5419</td>
-      <td>0.0028</td>
-      <td>0.0736</td>
-      <td>0.1856</td>
-      <td>0.0250</td>
-      <td>0.0112</td>
-      <td>0.4240</td>
-      <td>-0.0170</td>
-      <td>-0.0026</td>
-      <td>-0.0029</td>
-      <td>-0.0025</td>
-      <td>-0.2007</td>
-    </tr>
-    <tr>
-      <td>2026-07-15</td>
-      <td>0.0136</td>
-      <td>-0.0056</td>
-      <td>0.0085</td>
-      <td>0.0019</td>
-      <td>0.5272</td>
-      <td>0.0027</td>
-      <td>0.0649</td>
-      <td>-0.1064</td>
-      <td>0.0247</td>
-      <td>0.0073</td>
-      <td>0.4532</td>
-      <td>-0.0163</td>
-      <td>-0.0008</td>
-      <td>-0.0031</td>
-      <td>-0.0026</td>
-      <td>-0.2124</td>
+      <td>-0.0000</td>
+      <td>-0.2520</td>
     </tr>
     <tr>
       <td>2026-07-16</td>
-      <td>0.0013</td>
-      <td>-0.0037</td>
-      <td>-0.0110</td>
-      <td>-0.0181</td>
-      <td>0.4268</td>
-      <td>0.0016</td>
-      <td>0.0629</td>
-      <td>-0.8515</td>
-      <td>0.0248</td>
-      <td>-0.0336</td>
-      <td>0.1737</td>
-      <td>-0.0171</td>
-      <td>-0.0067</td>
-      <td>-0.0031</td>
+      <td>-0.0006</td>
+      <td>-0.0007</td>
+      <td>0.0034</td>
+      <td>0.0019</td>
+      <td>0.2785</td>
+      <td>-0.0012</td>
+      <td>0.0209</td>
+      <td>1.8734</td>
+      <td>0.0041</td>
+      <td>-0.0088</td>
+      <td>0.3144</td>
+      <td>-0.0026</td>
+      <td>-0.0017</td>
+      <td>-0.0006</td>
+      <td>-0.0000</td>
+      <td>-0.1759</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>0.0019</td>
+      <td>0.0028</td>
+      <td>0.0006</td>
+      <td>0.0023</td>
+      <td>0.3533</td>
+      <td>-0.0010</td>
+      <td>0.0206</td>
+      <td>1.0171</td>
+      <td>0.0043</td>
+      <td>-0.0051</td>
+      <td>0.4789</td>
       <td>-0.0027</td>
-      <td>-0.2150</td>
+      <td>-0.0011</td>
+      <td>-0.0003</td>
+      <td>0.0000</td>
+      <td>-0.0961</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>0.0023</td>
+      <td>-0.0023</td>
+      <td>-0.0018</td>
+      <td>-0.0037</td>
+      <td>0.3310</td>
+      <td>-0.0011</td>
+      <td>0.0213</td>
+      <td>0.6227</td>
+      <td>0.0045</td>
+      <td>-0.0096</td>
+      <td>0.2648</td>
+      <td>-0.0030</td>
+      <td>-0.0023</td>
+      <td>-0.0008</td>
+      <td>-0.0001</td>
+      <td>-0.2842</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>-0.0037</td>
+      <td>-0.0037</td>
+      <td>-0.0006</td>
+      <td>-0.0014</td>
+      <td>0.2876</td>
+      <td>-0.0011</td>
+      <td>0.0221</td>
+      <td>0.3023</td>
+      <td>0.0046</td>
+      <td>-0.0111</td>
+      <td>0.1828</td>
+      <td>-0.0033</td>
+      <td>-0.0003</td>
+      <td>-0.0009</td>
+      <td>-0.0001</td>
+      <td>-0.2947</td>
     </tr>
   </tbody>
 </table><p><i>Macro stream (6 features) — real, stationary (Yahoo rates/DXY + BLS CPI):</i></p><table class="dataframe">
@@ -356,46 +356,46 @@ information than "neutral news".</td></tr>
   </thead>
   <tbody>
     <tr>
-      <td>2026-07-10</td>
-      <td>0.6025</td>
-      <td>0.0840</td>
-      <td>0.0011</td>
+      <td>2026-07-16</td>
+      <td>0.5454</td>
+      <td>0.0000</td>
+      <td>0.0000</td>
       <td>3.8844</td>
       <td>-0.3494</td>
-      <td>0.6500</td>
-    </tr>
-    <tr>
-      <td>2026-07-13</td>
-      <td>1.5284</td>
-      <td>0.1300</td>
-      <td>0.0043</td>
-      <td>3.8844</td>
-      <td>-0.3494</td>
-      <td>0.7000</td>
-    </tr>
-    <tr>
-      <td>2026-07-14</td>
-      <td>0.5479</td>
-      <td>0.0560</td>
-      <td>-0.0020</td>
-      <td>3.8844</td>
-      <td>-0.3494</td>
-      <td>0.7167</td>
-    </tr>
-    <tr>
-      <td>2026-07-15</td>
-      <td>0.0059</td>
-      <td>-0.0240</td>
-      <td>-0.0055</td>
-      <td>3.8844</td>
-      <td>-0.3494</td>
-      <td>0.7333</td>
+      <td>0.7500</td>
     </tr>
     <tr>
       <td>2026-07-16</td>
-      <td>0.2185</td>
-      <td>0.0340</td>
-      <td>-0.0020</td>
+      <td>0.4732</td>
+      <td>0.0000</td>
+      <td>0.0000</td>
+      <td>3.8844</td>
+      <td>-0.3494</td>
+      <td>0.7500</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>0.3983</td>
+      <td>0.0000</td>
+      <td>0.0000</td>
+      <td>3.8844</td>
+      <td>-0.3494</td>
+      <td>0.7500</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>0.3165</td>
+      <td>0.0000</td>
+      <td>0.0000</td>
+      <td>3.8844</td>
+      <td>-0.3494</td>
+      <td>0.7500</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>0.2181</td>
+      <td>0.0000</td>
+      <td>0.0000</td>
       <td>3.8844</td>
       <td>-0.3494</td>
       <td>0.7500</td>
@@ -422,94 +422,94 @@ information than "neutral news".</td></tr>
   </thead>
   <tbody>
     <tr>
-      <td>2026-07-10</td>
-      <td>-0.2739</td>
-      <td>0.0761</td>
-      <td>-0.3681</td>
-      <td>-0.1556</td>
-      <td>-0.3077</td>
-      <td>-0.0011</td>
-      <td>0.0863</td>
-      <td>-0.2076</td>
-      <td>2.2962</td>
+      <td>2026-07-16</td>
+      <td>-0.1958</td>
+      <td>0.0186</td>
+      <td>-0.2095</td>
+      <td>-0.1754</td>
+      <td>-0.2227</td>
+      <td>0.0000</td>
+      <td>0.0507</td>
+      <td>-0.2545</td>
+      <td>-1.6663</td>
+      <td>0.0000</td>
       <td>0.0000</td>
       <td>1.0000</td>
-      <td>0.0000</td>
-      <td>0.0000</td>
-    </tr>
-    <tr>
-      <td>2026-07-13</td>
-      <td>-0.2688</td>
-      <td>0.0687</td>
-      <td>-0.3428</td>
-      <td>-0.1556</td>
-      <td>-0.3149</td>
-      <td>-0.0561</td>
-      <td>0.0822</td>
-      <td>-0.2103</td>
-      <td>2.5425</td>
-      <td>0.0000</td>
-      <td>1.0000</td>
-      <td>0.0000</td>
-      <td>0.0000</td>
-    </tr>
-    <tr>
-      <td>2026-07-14</td>
-      <td>-0.3088</td>
-      <td>0.1148</td>
-      <td>-0.4733</td>
-      <td>-0.1556</td>
-      <td>-0.3476</td>
-      <td>-0.1305</td>
-      <td>0.0928</td>
-      <td>-0.2429</td>
-      <td>2.7767</td>
-      <td>0.0000</td>
-      <td>1.0000</td>
-      <td>0.0000</td>
-      <td>0.0000</td>
-    </tr>
-    <tr>
-      <td>2026-07-15</td>
-      <td>-0.3759</td>
-      <td>0.1000</td>
-      <td>-0.4914</td>
-      <td>-0.2856</td>
-      <td>-0.3773</td>
-      <td>-0.0180</td>
-      <td>0.1014</td>
-      <td>-0.2703</td>
-      <td>2.2431</td>
-      <td>0.0000</td>
-      <td>1.0000</td>
-      <td>0.0000</td>
       <td>0.0000</td>
     </tr>
     <tr>
       <td>2026-07-16</td>
-      <td>-0.4064</td>
-      <td>0.0881</td>
-      <td>-0.4914</td>
-      <td>-0.2867</td>
-      <td>-0.3898</td>
-      <td>0.0534</td>
-      <td>0.1040</td>
-      <td>-0.2878</td>
-      <td>1.9484</td>
+      <td>-0.2026</td>
+      <td>0.0152</td>
+      <td>-0.2095</td>
+      <td>-0.1754</td>
+      <td>-0.2200</td>
+      <td>0.0000</td>
+      <td>0.0417</td>
+      <td>-0.2536</td>
+      <td>-1.5114</td>
+      <td>0.0000</td>
       <td>0.0000</td>
       <td>1.0000</td>
       <td>0.0000</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>-0.2034</td>
+      <td>0.0136</td>
+      <td>-0.2095</td>
+      <td>-0.1789</td>
+      <td>-0.2115</td>
+      <td>0.0306</td>
+      <td>0.0402</td>
+      <td>-0.2482</td>
+      <td>-1.4173</td>
+      <td>0.0000</td>
+      <td>0.0000</td>
+      <td>1.0000</td>
+      <td>0.0000</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>-0.1933</td>
+      <td>0.0232</td>
+      <td>-0.2095</td>
+      <td>-0.1592</td>
+      <td>-0.2007</td>
+      <td>0.0198</td>
+      <td>0.0316</td>
+      <td>-0.2363</td>
+      <td>-1.3112</td>
+      <td>0.0000</td>
+      <td>0.0000</td>
+      <td>1.0000</td>
+      <td>0.0000</td>
+    </tr>
+    <tr>
+      <td>2026-07-16</td>
+      <td>-0.1935</td>
+      <td>0.0234</td>
+      <td>-0.2104</td>
+      <td>-0.1592</td>
+      <td>-0.2027</td>
+      <td>-0.0512</td>
+      <td>0.0211</td>
+      <td>-0.2418</td>
+      <td>-1.2556</td>
+      <td>0.0000</td>
+      <td>0.0000</td>
+      <td>1.0000</td>
       <td>0.0000</td>
     </tr>
   </tbody>
 </table>
 <h2>4. Input to the Hybrid CNN-LSTM-Transformer</h2>
-<p>Each training sample is a sliding window (60 trading days (~3 months) of context, 10-day (2-week) horizon):</p>
+<p>Each training sample is a sliding window (60 hours of context, 10-bar horizon):</p>
 <pre>X            (60, 35)   — 60 consecutive bars × 35 fused features
 y            (10,)      — cumulative log-returns of close at t+1 … t+10 (the target)
 regime_ctx   (2,)       — realised volatility and ATR at the forecast origin
 xgb_pred     (10,)      — the frozen XGBoost expert's forecast for the same window</pre>
-<p>The 300-bar panel is split chronologically 70/15/15 (train/validation/test;
+<p>The 62,049-bar panel is split chronologically 70/15/15 (train/validation/test;
 <b>?</b> test windows), with normalisation fit on the training split only. The
 target is a <i>return</i>, not a price level — predicting levels rewards trivial
 random-walk copying; predicting return signs is the honest task. A slice of the per-bar
@@ -531,58 +531,58 @@ sentiment block that enters the window
   </thead>
   <tbody>
     <tr>
-      <td>2026-07-10</td>
-      <td>4119.330</td>
-      <td>-0.308</td>
-      <td>-0.001</td>
-      <td>2.296</td>
+      <td>2026-07-16 16:00:00</td>
+      <td>3990.030</td>
+      <td>-0.223</td>
+      <td>0.000</td>
+      <td>-1.666</td>
+      <td>0.000</td>
       <td>0.000</td>
       <td>1.000</td>
-      <td>0.000</td>
       <td>0.000</td>
     </tr>
     <tr>
-      <td>2026-07-13</td>
-      <td>4001.030</td>
-      <td>-0.315</td>
-      <td>-0.056</td>
-      <td>2.542</td>
+      <td>2026-07-16 17:00:00</td>
+      <td>3997.740</td>
+      <td>-0.220</td>
+      <td>0.000</td>
+      <td>-1.511</td>
+      <td>0.000</td>
       <td>0.000</td>
       <td>1.000</td>
-      <td>0.000</td>
       <td>0.000</td>
     </tr>
     <tr>
-      <td>2026-07-14</td>
-      <td>4052.880</td>
-      <td>-0.348</td>
-      <td>-0.131</td>
-      <td>2.777</td>
+      <td>2026-07-16 18:00:00</td>
+      <td>4006.950</td>
+      <td>-0.212</td>
+      <td>0.031</td>
+      <td>-1.417</td>
+      <td>0.000</td>
       <td>0.000</td>
       <td>1.000</td>
-      <td>0.000</td>
       <td>0.000</td>
     </tr>
     <tr>
-      <td>2026-07-15</td>
-      <td>4060.480</td>
-      <td>-0.377</td>
-      <td>-0.018</td>
-      <td>2.243</td>
+      <td>2026-07-16 19:00:00</td>
+      <td>3992.030</td>
+      <td>-0.201</td>
+      <td>0.020</td>
+      <td>-1.311</td>
+      <td>0.000</td>
       <td>0.000</td>
       <td>1.000</td>
-      <td>0.000</td>
       <td>0.000</td>
     </tr>
     <tr>
-      <td>2026-07-16</td>
-      <td>3987.620</td>
-      <td>-0.390</td>
-      <td>0.053</td>
-      <td>1.948</td>
+      <td>2026-07-16 20:00:00</td>
+      <td>3986.310</td>
+      <td>-0.203</td>
+      <td>-0.051</td>
+      <td>-1.256</td>
+      <td>0.000</td>
       <td>0.000</td>
       <td>1.000</td>
-      <td>0.000</td>
       <td>0.000</td>
     </tr>
   </tbody>
@@ -719,33 +719,33 @@ rows are directly comparable:</p>
   <tbody>
     <tr>
       <td>Gold (XAU/USD)</td>
-      <td>1202</td>
-      <td>0.5355</td>
-      <td>0.0132</td>
-      <td>0.0198</td>
-      <td>0.5399</td>
-      <td>0.5351</td>
-      <td>0.4859</td>
+      <td>9297</td>
+      <td>0.5367</td>
+      <td>0.0048</td>
+      <td>0.0076</td>
+      <td>0.5286</td>
+      <td>0.5329</td>
+      <td>0.5017</td>
     </tr>
     <tr>
       <td>Silver (XAG/USD)</td>
-      <td>1202</td>
-      <td>0.4907</td>
-      <td>0.0283</td>
-      <td>0.0430</td>
-      <td>0.4910</td>
-      <td>0.5519</td>
-      <td>0.5176</td>
+      <td>9339</td>
+      <td>0.5250</td>
+      <td>0.0094</td>
+      <td>0.0159</td>
+      <td>0.5262</td>
+      <td>0.5185</td>
+      <td>0.5127</td>
     </tr>
     <tr>
       <td>Euro (EUR/USD)</td>
-      <td>1201</td>
-      <td>0.6112</td>
-      <td>0.0023</td>
-      <td>0.0031</td>
-      <td>0.6575</td>
-      <td>0.4958</td>
-      <td>0.4958</td>
+      <td>9828</td>
+      <td>0.6229</td>
+      <td>0.0013</td>
+      <td>0.0022</td>
+      <td>0.6217</td>
+      <td>0.4974</td>
+      <td>0.4934</td>
     </tr>
   </tbody>
 </table>
@@ -1205,9 +1205,9 @@ the probabilistic forecaster.</li>
 
 <h2>9. Summary &amp; conclusion</h2>
 <p>This project built and honestly evaluated a complete multi-modal FX forecasting
-system: <b>300 live daily XAU/USD candles</b> from yfinance
+system: <b>62,049 live 60-minute XAU/USD candles</b> from yfinance
 (daily runs use the full listed history), a real news pipeline (Google News RSS with a
-dedicated Reuters lane + GDELT archive + direct RSS, <b>19,195</b> FinBERT-scored
+dedicated Reuters lane + GDELT archive + direct RSS, <b>22,200</b> FinBERT-scored
 headlines with 100% test-set coverage), <b>REAL macro (Yahoo rates/DXY + BLS CPI)</b>, <b>35 engineered
 features</b> (16 technical incl. GARCH-style drift / 6 macro / 13 sentiment incl.
 diffusion breadth), and a dual-tower Hybrid CNN-LSTM-Transformer: a causal-dilated CNN +

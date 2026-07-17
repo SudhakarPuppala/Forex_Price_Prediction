@@ -127,16 +127,51 @@ def arima_walk_forward(panel, test_ds, horizon, stride=5):
             "MAE": float(np.abs(yp - yt).mean())}
 
 
-def run_pair(pair: str, interval: str = "4h") -> dict:
+def _truncate_panel(panel, bars: int):
+    """Keep only the LAST `bars` rows of a panel -- the smoke-test path.
+    Slices every per-bar array together so they stay aligned."""
+    import dataclasses
+    n = min(int(bars), len(panel.close))
+    return dataclasses.replace(
+        panel,
+        features=panel.features[-n:],
+        close=panel.close[-n:],
+        realized_vol=panel.realized_vol[-n:],
+        atr=panel.atr[-n:],
+        dates=panel.dates[-n:],
+    )
+
+
+def run_pair(pair: str, interval: str = "4h", bars: int = None,
+             epochs: int = None, source: str = "real",
+             train_stride: int = 1, refit_every: int = 14) -> dict:
     cfg = get_pair(pair)
-    print(f"\n===== {cfg.name} ({cfg.label}) @ {interval} =====")
-    # Build from the pair's own real feeds (offline news = use the pair's
-    # archive; news-less if none yet), then persist the pair's panel.
-    # interval="4h" pulls H4 candles from MT5 (2011->now, ~8k bars); "1d" keeps
-    # the legacy daily pipeline.
-    panel = build_fx_panel(pair=pair, n_days=10000, seed=SEED, source="real", real_interval=interval)
-    save_panel_csv(panel, panel_csv_path(pair))
+    smoke = bars is not None
+    print(f"\n===== {cfg.name} ({cfg.label}) @ {interval}"
+          f"{f'  [SMOKE: {bars} bars, {epochs} epochs]' if smoke else ''} =====")
+    # source="panel" loads the FROZEN panel (fast -- the smoke path); "real"
+    # rebuilds from the pair's own feeds. interval="1h" is the H1 pipeline.
+    panel = build_fx_panel(pair=pair, n_days=10000, seed=SEED, source=source,
+                           real_interval=interval)
+    if smoke:
+        panel = _truncate_panel(panel, bars)
+        print(f"[train_pairs] SMOKE: truncated to last {len(panel.close)} bars "
+              f"({panel.dates[0]} -> {panel.dates[-1]})")
+    else:
+        # Never overwrite the frozen panel from a truncated smoke run.
+        save_panel_csv(panel, panel_csv_path(pair))
     tr, va, te = time_split(panel)
+    if train_stride > 1:
+        # Consecutive hourly windows overlap 59/60 bars (~98%), so neighbouring
+        # training origins are almost the same sample. Striding the TRAIN/VAL
+        # origins cuts epoch cost ~stride-fold for very little information loss.
+        # The TEST set is never strided -- evaluation stays on every window.
+        n0, v0 = len(tr.indices), len(va.indices)
+        tr.indices = tr.indices[::train_stride]
+        va.indices = va.indices[::train_stride]
+        print(f"[train_pairs] train stride {train_stride}: "
+              f"train {n0:,}->{len(tr.indices):,}, val {v0:,}->{len(va.indices):,} "
+              f"(test untouched)")
     print(f"[train_pairs] {cfg.slug}: {len(panel.close)} bars, "
           f"train={len(tr)} val={len(va)} test={len(te)}")
 
@@ -153,7 +188,12 @@ def run_pair(pair: str, interval: str = "4h") -> dict:
     xgb.fit(tr, va)
     tr_x = XGBAugmentedDataset(tr, xgb, garch_preds=_g(tr))
     va_x = XGBAugmentedDataset(va, xgb, garch_preds=_g(va))
-    wf = walk_forward_expert_preds(tr, va, te, refit_every=14)
+    # refit_every: at H4 (1.2k test windows) 14 meant ~86 refits; at H1 (9.3k
+    # test windows) it would mean ~664 full MultiOutputRegressor fits and
+    # dominate the runtime. 100 hourly bars is ~4 trading days -- the tabular
+    # expert is stable over that -- and the walk-forward contract is unchanged
+    # (each block still only sees data strictly before its first origin).
+    wf = walk_forward_expert_preds(tr, va, te, refit_every=refit_every)
     te_x = XGBAugmentedDataset(te, xgb, preds=wf, garch_preds=_g(te))
 
     torch.manual_seed(SEED)
@@ -161,7 +201,7 @@ def run_pair(pair: str, interval: str = "4h") -> dict:
     tr_text = _text_dense_subset(tr_x, panel, TRAIN_CFG.two_stage_text_from)
     va_text = _text_dense_subset(va_x, panel, TRAIN_CFG.two_stage_text_from)
     hybrid, _ = train_two_stage(hybrid, tr_x, va_x, tr_text, va_text,
-                                epochs=TRAIN_CFG.epochs, lr=TRAIN_CFG.lr * 0.5,
+                                epochs=(epochs or TRAIN_CFG.epochs), lr=TRAIN_CFG.lr * 0.5,
                                 device="cpu",
                                 classification_weight=TRAIN_CFG.classification_loss_weight,
                                 seed=SEED)
@@ -196,6 +236,10 @@ def run_pair(pair: str, interval: str = "4h") -> dict:
         "pair": cfg.name, "slug": cfg.slug, "label": cfg.label,
         "seed": SEED, "saved_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "interval": interval,
+        # Mark dry runs so a 2-epoch/500-bar checkpoint can never be mistaken
+        # for a real result on the dashboard or in the report.
+        "smoke": bool(smoke),
+        "epochs": int(epochs or TRAIN_CFG.epochs),
         "feature_names": list(panel.feature_names),
         "lookback": DATA_CFG.lookback, "horizon": DATA_CFG.horizon,
         "n_total": DATA_CFG.n_total_features,
@@ -221,12 +265,30 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pairs", nargs="+", default=ALL_PAIRS)
     ap.add_argument("--interval", default="4h",
-                    help="candle interval: 4h (MT5 H4, default) or 1d (legacy daily)")
+                    help="candle interval: 1h (H1 pipeline), 4h, or 1d (legacy daily)")
+    ap.add_argument("--source", default="real", choices=["real", "panel"],
+                    help="'real' rebuilds from the feeds; 'panel' loads the frozen "
+                         "feature panel (fast -- use for smoke runs)")
+    ap.add_argument("--bars", type=int, default=None,
+                    help="SMOKE TEST: use only the last N bars. Note GARCH needs "
+                         ">=250 bars (MIN_HISTORY) or its expert/baseline is skipped.")
+    ap.add_argument("--epochs", type=int, default=None,
+                    help="override the configured epoch budget (smoke runs)")
+    ap.add_argument("--train-stride", type=int, default=1,
+                    help="keep every Nth TRAIN/VAL origin (test is never strided). "
+                         "Hourly windows overlap ~98%%, so 3 cuts epoch cost ~3x "
+                         "with little information loss.")
+    ap.add_argument("--refit-every", type=int, default=14,
+                    help="walk-forward XGBoost refit interval in test windows. "
+                         "Use ~100 at H1: 14 would mean ~664 refits/pair.")
     args = ap.parse_args()
 
     summary = {}
     for pair in args.pairs:
-        summary[get_pair(pair).slug] = run_pair(pair, interval=args.interval)
+        summary[get_pair(pair).slug] = run_pair(
+            pair, interval=args.interval, bars=args.bars,
+            epochs=args.epochs, source=args.source,
+            train_stride=args.train_stride, refit_every=args.refit_every)
     os.makedirs("results/pair_metrics", exist_ok=True)
     json.dump(summary, open("results/pair_metrics/all_pairs.json", "w"), indent=2, default=float)
     print("\n[train_pairs] wrote results/pair_metrics/all_pairs.json")
