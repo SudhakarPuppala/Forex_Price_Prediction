@@ -40,8 +40,10 @@ class DataConfig:
     currency_pairs: List[str] = field(default_factory=lambda: ["XAU/USD", "XAG/USD"])
     lookback: int = 60          # T
     horizon: int = 10           # k
-    n_technical_features: int = 16    # OHLC log-returns(4) + RSI + MACD hist + BB width + volume z
+    n_technical_features: int = 18    # OHLC log-returns(4) + RSI + MACD hist + BB width + volume z
                                       # + ATR% + ROC-10 + Stochastic %K + EMA12/26 ratio
+                                      # + env_dev20 + bb_pctb (price-position-vs-band; the
+                                      #   envelope signal -- band WIDTH alone carried no direction)
                                       # + drift_5/21/60 + drift_tstat (the GARCH-style
                                       # conditional-mean state, fed directly)
     n_macro_features: int = 6         # rate diff, CPI, CB stance, 2 lags, calendar flag
@@ -49,7 +51,7 @@ class DataConfig:
                                       # + diffusion breadth index) + 4 one-hot buy/sell/hold/none
                                       # trading-signal features (data/sentiment.py:derive_trading_signals)
     n_signal_classes: int = 4         # buy / sell / hold / none -- the LAST 4 sentiment columns
-    n_total_features: int = 35        # must equal sum of streams (35 -> 64 fusion)
+    n_total_features: int = 37        # must equal sum of streams (37 -> 64 fusion)
     train_frac: float = 0.7
     val_frac: float = 0.15
     # test_frac is implicit = 1 - train_frac - val_frac

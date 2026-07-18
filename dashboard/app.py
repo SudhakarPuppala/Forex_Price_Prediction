@@ -93,7 +93,16 @@ def load_model_and_xgb(pair: str = "XAU/USD"):
           else np.stack([np.asarray(garch_by.get(t, _gz), dtype="float32") for t in test_ds.indices]))
     test_x = XGBAugmentedDataset(test_ds, xgb, garch_preds=gp)
     hybrid = HybridCNNLSTMTransformer()
-    hybrid.load_state_dict(torch.load(os.path.join(ckpt, "hybrid.pt"), map_location="cpu"))
+    try:
+        hybrid.load_state_dict(torch.load(os.path.join(ckpt, "hybrid.pt"), map_location="cpu"))
+    except RuntimeError as e:
+        # Checkpoint width != current config (e.g. a 35-feature checkpoint after
+        # the 37-feature envelope upgrade). Surface it instead of crashing.
+        print(f"[dashboard] checkpoint incompatible with current feature config: {e}")
+        st.warning("The saved checkpoint predates the current feature configuration "
+                   f"({DATA_CFG.n_total_features} features) — retrain to refresh it: "
+                   "`python scripts/train_pairs.py`", icon="⚠️")
+        return None
     hybrid.eval()
     return hybrid, xgb, test_x, panel, test_ds
 
@@ -1096,6 +1105,10 @@ elif page.startswith("📈"):
                     GREEN, f"RMSE {hyb_rmse:.4f}" if hyb_rmse else "lowest error")
         rows = [{"Model": "Hybrid CNN-LSTM-Transformer", "DirAcc": round(hyb, 4),
                  "MAE": round(hyb_mae, 5), "RMSE": round(hyb_rmse, 5) if hyb_rmse else None}]
+        _cal = pm["hybrid"].get("DirAcc_calibrated")
+        if _cal is not None:
+            rows.append({"Model": "Hybrid (val-calibrated sign thresholds)",
+                         "DirAcc": round(_cal, 4), "MAE": None, "RMSE": None})
         if wf is not None:
             rows.append({"Model": "WF-XGBoost expert (pair-local)", "DirAcc": round(wf, 4),
                          "MAE": None, "RMSE": None})

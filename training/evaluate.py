@@ -65,6 +65,35 @@ def collect_predictions(model, dataset, device: str = "cpu"):
     )
 
 
+def calibrate_sign_thresholds(val_true: np.ndarray, val_pred: np.ndarray,
+                              n_grid: int = 41) -> np.ndarray:
+    """Per-horizon sign-decision thresholds tuned on the VALIDATION split.
+
+    The clean gold H1 Hybrid scored BELOW the always-up base rate (0.5126 vs
+    0.5344): its raw sign(pred) rule under-weights the series drift, and a
+    constant drift offset was measured insufficient (analysis/envelope_
+    calibration_gold.py). This is the stronger, still-honest correction: for
+    each horizon pick the threshold tau_h maximising DirAcc on VAL (grid over
+    val-pred quantiles + 0), then score TEST with sign(pred - tau_h). Val is
+    the tuning split, so nothing touches test; taus are frozen constants at
+    evaluation time.
+    """
+    taus = np.zeros(val_pred.shape[1])
+    for h in range(val_pred.shape[1]):
+        cands = np.quantile(val_pred[:, h], np.linspace(0.10, 0.90, n_grid))
+        cands = np.concatenate([[0.0], cands])
+        accs = [(np.sign(val_pred[:, h] - c) == np.sign(val_true[:, h])).mean()
+                for c in cands]
+        taus[h] = float(cands[int(np.argmax(accs))])
+    return taus
+
+
+def calibrated_directional_accuracy(y_true: np.ndarray, y_pred: np.ndarray,
+                                    taus: np.ndarray) -> float:
+    """DirAcc of sign(pred - tau_h) against sign(actual), all horizons pooled."""
+    return float((np.sign(y_pred - taus[None, :]) == np.sign(y_true)).mean())
+
+
 def evaluate_deep_model(model, dataset, model_name: str, device: str = "cpu"):
     y_true, y_pred, direction_logits, regime_ctx, band = collect_predictions(model, dataset, device=device)
     regime_labels = label_regimes(regime_ctx[:, 0])  # realised vol column

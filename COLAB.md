@@ -22,10 +22,26 @@ print("CUDA:", torch.cuda.is_available(), "|", torch.cuda.get_device_name(0) if 
 (the default) the frozen feature panel is loaded straight from the repo, so
 there is no news-scoring or MT5 access.
 
-## 2. Train (per-pair pipeline)
+## 2. Rebuild the panel (REQUIRED since the 37-feature envelope upgrade)
+
+The committed frozen panel is 35-feature; the current config adds `env_dev20` +
+`bb_pctb` (37). Rebuild once per session before training (~1–2 min; the news
+archive is fully scored, so no live fetching):
 
 ```python
-# GPU auto-detected; loads the committed frozen H1 panel; ~minutes on a T4/A100.
+!pip install -q transformers   # FinBERT import path (cached scores are reused)
+import os
+os.environ.update(FOREX_OFFLINE_NEWS="1", FOREX_PRICE_SOURCE="csv",
+                  FOREX_PANEL_START="2016-01-01", FOREX_ALIGN_HOURS="24",
+                  FOREX_NO_MT5="1")
+!python ./scripts/build_dataset.py --pair XAU/USD --interval 1h
+```
+
+## 3. Train (per-pair pipeline)
+
+```python
+# GPU auto-detected; ~minutes on a T4/A100. Prints raw AND val-calibrated
+# DirAcc (per-horizon sign thresholds tuned on the validation split).
 !python ./scripts/train_pairs.py --pairs XAU/USD --interval 1h
 ```
 
@@ -33,7 +49,7 @@ Useful flags: `--device cuda|cpu|auto`, `--batch-size 256`,
 `--train-stride 1` (GPU epochs are cheap, so no need to stride),
 `--epochs N`, `--source real` (rebuild from feeds instead of the frozen panel).
 
-## 3. Multi-seed stability
+## 4. Multi-seed stability
 
 ```python
 # 3 seeds -> results/multi_seed_XAUUSD.json + roadmap_XAUUSD.json

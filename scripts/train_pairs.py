@@ -229,6 +229,21 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
                                 seed=SEED)
     rep, y_true, y_pred, band = evaluate_deep_model(hybrid, te_x, f"Hybrid_{cfg.slug}", device=dev)
 
+    # Val-tuned per-horizon sign thresholds (reported ALONGSIDE raw, never
+    # instead): raw sign(pred) under-weights the drift and scored below the
+    # always-up base rate at H1; tuning the decision threshold on VAL is the
+    # split's purpose and touches nothing in test.
+    from training.evaluate import (collect_predictions, calibrate_sign_thresholds,
+                                   calibrated_directional_accuracy)
+    v_true, v_pred, _, _, _ = collect_predictions(hybrid, va_x, device=dev)
+    taus = calibrate_sign_thresholds(v_true, v_pred)
+    cal_da = calibrated_directional_accuracy(y_true, y_pred, taus)
+    base_up = float((y_true > 0).mean())
+    base_rate = max(base_up, 1 - base_up)
+    print(f"[train_pairs] {cfg.slug}: val-calibrated DirAcc {cal_da:.4f} "
+          f"(raw {rep['overall']['DirectionalAccuracy']:.4f}, always-up base {base_rate:.4f}, "
+          f"edge {(cal_da - base_rate) * 100:+.1f}pp)")
+
     # baselines on the same test windows
     logc = np.log(np.asarray(panel.close, dtype=np.float64))
     yt, gp = [], []
@@ -269,7 +284,11 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
         "date_end": str(panel.dates[-1]),
         "split": {"train": len(tr), "val": len(va), "test": len(te)},
         "hybrid": {"DirAcc": rep["overall"]["DirectionalAccuracy"],
-                   "MAE": rep["overall"]["MAE"], "RMSE": rep["overall"]["RMSE"]},
+                   "MAE": rep["overall"]["MAE"], "RMSE": rep["overall"]["RMSE"],
+                   "DirAcc_calibrated": cal_da},
+        "calibration": {"sign_thresholds": taus.tolist(),
+                        "always_up_base_rate": base_rate,
+                        "edge_vs_base_pp": round((cal_da - base_rate) * 100, 2)},
         "wf_expert_diracc": wf_da,
         "garch": garch_m, "arima": arima_m,
         "n_params": int(hybrid.count_parameters()),

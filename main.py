@@ -269,6 +269,23 @@ def run(
     abstention = calibrate_abstention(val_true, val_pred, y_true, y_pred,
                                       val_conf=val_conf, test_conf=test_conf)
     reports["Hybrid_CNN_LSTM_Transformer"]["calibrated_abstention"] = abstention
+
+    # Val-tuned per-horizon SIGN thresholds: the raw sign(pred) rule scored
+    # below the always-up base rate on H1 gold, and a constant drift shift was
+    # measured insufficient -- tune the decision threshold per horizon on VAL
+    # (its purpose), freeze, score test. Reported alongside raw, never instead.
+    from training.evaluate import calibrate_sign_thresholds, calibrated_directional_accuracy
+    _taus = calibrate_sign_thresholds(val_true, val_pred)
+    _raw_da = reports["Hybrid_CNN_LSTM_Transformer"]["overall"]["DirectionalAccuracy"]
+    _cal_da = calibrated_directional_accuracy(y_true, y_pred, _taus)
+    _base = max(float((y_true > 0).mean()), 1 - float((y_true > 0).mean()))
+    reports["Hybrid_CNN_LSTM_Transformer"]["calibrated_direction"] = {
+        "thresholds": _taus.tolist(), "test_diracc": _cal_da,
+        "raw_test_diracc": _raw_da, "always_up_base_rate": _base,
+    }
+    print(f"[hybrid] val-calibrated sign thresholds: test DirAcc {_cal_da:.4f} "
+          f"(raw {_raw_da:.4f}, always-up base {_base:.4f}, "
+          f"edge vs base {(_cal_da - _base) * 100:+.1f}pp)")
     if abstention:
         print(f"[hybrid] calibrated abstention: act on {abstention['test_coverage']*100:.0f}% of signals "
               f"(tau from val q={abstention['conf_quantile']}, mode={abstention['mode']}) -> test selective DirAcc "

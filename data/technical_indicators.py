@@ -91,6 +91,21 @@ def compute_technical_features(ohlc: pd.DataFrame) -> pd.DataFrame:
 
     atr_pct = (average_true_range(ohlc) / close.replace(0, np.nan)).fillna(0.0)
     roc_10 = np.log(close / close.shift(10)).fillna(0.0)
+
+    # --- Envelope / band-position features (2026-07-19). The panel carried
+    # band WIDTH (bb_width -- a volatility proxy) but no PRICE-POSITION-vs-band
+    # signal, which is the directional part a trader reads off MA envelopes.
+    # Pre-checked on the frozen gold H1 panel (analysis/envelope_calibration_
+    # gold.py): U-shaped conditional signal -- both dev extremes lean bullish
+    # (P(up) 0.557 vs base 0.542), so let the network learn the shape rather
+    # than hand-coding a fade rule. Causal: rolling stats up to bar t only.
+    sma20 = close.rolling(20, min_periods=1).mean()
+    env_dev20 = (close / sma20.replace(0, np.nan) - 1.0).fillna(0.0)
+    _sd20 = close.rolling(20, min_periods=2).std()
+    # %B: position within the +/-2-sigma Bollinger band (0=lower, 1=upper);
+    # kept unclipped so band BREACHES (>1, <0) stay visible to the model.
+    bb_pctb = ((close - (sma20 - 2.0 * _sd20)) / (4.0 * _sd20)).replace(
+        [np.inf, -np.inf], np.nan).fillna(0.5)
     stoch = stochastic_k(ohlc)
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
@@ -123,6 +138,8 @@ def compute_technical_features(ohlc: pd.DataFrame) -> pd.DataFrame:
             "roc_10": roc_10,
             "stoch_k": stoch,
             "ema_ratio": ema_ratio,
+            "env_dev20": env_dev20,
+            "bb_pctb": bb_pctb,
             "drift_5": drift_5,
             "drift_21": drift_21,
             "drift_60": drift_60,
