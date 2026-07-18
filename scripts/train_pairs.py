@@ -166,7 +166,7 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
           f"{f'  [SMOKE: {bars} bars, {epochs} epochs]' if smoke else ''} =====")
     # source="panel" loads the FROZEN panel (fast -- the smoke path); "real"
     # rebuilds from the pair's own feeds. interval="1h" is the H1 pipeline.
-    panel = build_fx_panel(pair=pair, n_days=10000, seed=SEED, source=source,
+    panel = build_fx_panel(pair=pair, n_days=200000, seed=SEED, source=source,
                            real_interval=interval)
     if smoke:
         panel = _truncate_panel(panel, bars)

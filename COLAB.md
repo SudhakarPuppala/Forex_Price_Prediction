@@ -22,18 +22,18 @@ print("CUDA:", torch.cuda.is_available(), "|", torch.cuda.get_device_name(0) if 
 (the default) the frozen feature panel is loaded straight from the repo, so
 there is no news-scoring or MT5 access.
 
-## 2. Rebuild the panel (REQUIRED since the 37-feature envelope upgrade)
+## 2. Panel (OPTIONAL — the committed panel is already 37-feature)
 
-The committed frozen panel is 35-feature; the current config adds `env_dev20` +
-`bb_pctb` (37). Rebuild once per session before training (~1–2 min; the news
-archive is fully scored, so no live fetching):
+The committed `exports/pairs/XAUUSD/feature_panel.csv` is the canonical
+62,049-bar × 37-feature panel (rebuilt 2026-07-19, verified from the 16y CSV).
+Rebuild only if you change features or data. A bare command now does the right
+thing — the price source defaults to the curated **CSV** (the live MT5 pull
+serves only ~3.5y of genuine H1 and is never used for builds), and the 2016
+start + 24h news window are applied automatically for intraday intervals:
 
 ```python
 !pip install -q transformers   # FinBERT import path (cached scores are reused)
-import os
-os.environ.update(FOREX_OFFLINE_NEWS="1", FOREX_PRICE_SOURCE="csv",
-                  FOREX_PANEL_START="2016-01-01", FOREX_ALIGN_HOURS="24",
-                  FOREX_NO_MT5="1")
+import os; os.environ.update(FOREX_OFFLINE_NEWS="1", FOREX_NO_MT5="1")
 !python ./scripts/build_dataset.py --pair XAU/USD --interval 1h
 ```
 

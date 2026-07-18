@@ -107,11 +107,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pair", default="XAU/USD")
     ap.add_argument("--interval", default="1d")
-    ap.add_argument("--n_days", type=int, default=10000)
+    ap.add_argument("--n_days", type=int, default=200000,
+                    help="max bars to keep. Default 200000 = effectively ALL of the "
+                         "curated CSV (~97k H1 bars, 2010->now); the old 10000 default "
+                         "silently amputated 2010-2022 from the panel.")
     ap.add_argument("--out", default=None,
                     help="panel output path (default: exports/pairs/<slug>/feature_panel.csv)")
     args = ap.parse_args()
     out = args.out or panel_csv_path(args.pair)
+
+    # Canonical intraday defaults (overridable via the environment): start the
+    # panel where the news archive begins (2016 -- earlier bars are sentiment-
+    # dead and sink coverage below the 50% target) and use the measured 24h
+    # news-alignment window. A bare `python scripts/build_dataset.py --interval
+    # 1h` now reproduces the frozen canonical panel with no env setup.
+    if args.interval.endswith(("h", "m")):
+        import os
+        os.environ.setdefault("FOREX_PANEL_START", "2016-01-01")
+        os.environ.setdefault("FOREX_ALIGN_HOURS", "24")
+        print(f"[pipeline1] intraday defaults: FOREX_PANEL_START="
+              f"{os.environ['FOREX_PANEL_START']}, FOREX_ALIGN_HOURS="
+              f"{os.environ['FOREX_ALIGN_HOURS']}, price source="
+              f"{os.environ.get('FOREX_PRICE_SOURCE', 'csv (default)')}")
 
     print(f"=== PIPELINE 1: building dataset for {args.pair} "
           f"(ticker {PAIR_TICKERS.get(args.pair, '?')}, interval {args.interval}) ===")

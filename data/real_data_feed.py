@@ -902,15 +902,19 @@ def try_fetch_real_panel(ticker_symbol: str = "GC=F", interval: str = "5m", coun
     ohlc = None
     if cfg is not None and os.environ.get("FOREX_NO_MT5") != "1":
         from data.mt5_feed import load_mt5_live, load_mt5_ohlc
-        # FOREX_PRICE_SOURCE: csv | live | auto (default).
+        # FOREX_PRICE_SOURCE: csv (default) | live | auto.
         #   csv  -- the curated terminal export (exports/pairs/<SLUG>/<SLUG>_H1.CSV).
         #           REQUIRED for historical H1 builds: the broker's live API only
         #           holds genuine intraday from 2023-01-03 and silently returns
         #           DAILY bars for older intraday requests, whereas the export has
         #           genuine hourly back to 2010.
         #   live -- the attached terminal (fresh bars; what live inference wants).
-        #   auto -- live first, CSV as fallback.
-        src = os.environ.get("FOREX_PRICE_SOURCE", "auto").lower()
+        #   auto -- live first, CSV as fallback (the dashboard's live path).
+        # DEFAULT IS csv: with a terminal running locally, "auto" preferred the
+        # live pull -- which serves at most ~3.5y of genuine H1 -- and silently
+        # ignored the curated 16-year CSV. Training/panel builds must never do
+        # that; only the dashboard's live-prediction path opts into "auto".
+        src = os.environ.get("FOREX_PRICE_SOURCE", "csv").lower()
         if src == "csv":
             ohlc = load_mt5_ohlc(cfg.name, interval)
         elif src == "live":
@@ -919,7 +923,10 @@ def try_fetch_real_panel(ticker_symbol: str = "GC=F", interval: str = "5m", coun
             ohlc = load_mt5_live(cfg.name, interval, count=count)
             if ohlc is None:
                 ohlc = load_mt5_ohlc(cfg.name, interval)
-        if ohlc is not None and count and len(ohlc) > int(count):
+        # Only cap history for LIVE-style pulls. In csv mode the curated file IS
+        # the dataset -- tail(n_days) here would silently amputate 2010-2022
+        # (count defaults to 10,000 while the CSV holds ~97,000 bars).
+        if src != "csv" and ohlc is not None and count and len(ohlc) > int(count):
             ohlc = ohlc.tail(int(count))
     if ohlc is None:
         ohlc = fetch_gold_candles(ticker_symbol=ticker_symbol, interval=interval, count=count)

@@ -188,6 +188,10 @@ def _build_live_panel(pair: str, interval: str, bar_key: str, fetch_news: bool):
         _os.environ.pop("FOREX_OFFLINE_NEWS", None)      # live news top-up (slow)
     else:
         _os.environ["FOREX_OFFLINE_NEWS"] = "1"          # cached archive (fast)
+    # LIVE prediction wants the freshest bars, so prefer the attached terminal
+    # with CSV fallback ("auto"). Everywhere else defaults to "csv" -- the
+    # curated 16y export -- because the broker API only serves ~3.5y genuine H1.
+    _os.environ["FOREX_PRICE_SOURCE"] = "auto"
     kwargs = dict(pair=pair, n_days=10000, source="real", real_interval=interval,
                   export_artifacts=False, use_fetch_cache=False)
     try:
