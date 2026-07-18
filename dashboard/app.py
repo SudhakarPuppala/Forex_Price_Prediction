@@ -205,7 +205,7 @@ def _build_live_panel(pair: str, interval: str, bar_key: str, fetch_news: bool):
 def compute_live_forecast(hybrid, xgb, pair="XAU/USD", fetch_news=False):
     """GENUINE out-of-sample forecast: fetch fresh live price + macro (yfinance),
     engineer the last 60-bar window, normalise with the training statistics, and
-    run the saved model to predict the next 10 trading days.
+    run the saved model to predict the next 10 hourly (H1) bars.
 
     News: by default the continuously-updated cached archive is used (FAST, ~15s
     — and its coverage already matches a live pull, since the sparsity, not a
@@ -389,7 +389,7 @@ def capture_layer_activations(model, xq, xt, rc, xgp):
 # ----------------------------- layer detail popups -----------------------------
 LAYER_DETAILS = {
     "Quant input": ("Quantitative input", "(B, 60, 18)",
-        "The technical + macroeconomic stream: 60 trailing daily bars, 18 features each.",
+        "The technical + macroeconomic stream: 60 trailing hourly (H1) bars, 18 features each.",
         ["12 technical features — OHLC log-returns, RSI, MACD-hist, Bollinger width, volume-z, ATR%, ROC, %K, EMA ratio",
          "6 macro features — short-rate z, 10y-yield change, dollar-index return, CPI yoy, CPI mom, days-since-CPI",
          "All stationary-transformed and normalised with train-split statistics (no look-ahead)"]),
@@ -467,7 +467,6 @@ page = st.sidebar.radio("Navigate", [
     "📈 Results & Baselines",
 ])
 meta = load_json(os.path.join(CKPT_PAIR, "meta.json"))
-summ = load_json("results/multi_seed_summary.json")
 st.sidebar.divider()
 st.sidebar.markdown(f"**{PCFG.emoji} {PCFG.label}**")
 if meta and "saved_at" in meta:
@@ -485,12 +484,13 @@ if page.startswith("🏠"):
     st.caption("Student: PUPPALA V V SUDHAKAR · BITS ID 2024AA05488")
     st.divider()
 
-    bars = meta.get("panel_bars") if meta else None
+    bars = meta.get("bars") if meta else None
     c = st.columns(4)
-    metric_card(c[0], "Model parameters", f"{meta['n_params']/1e6:.2f}M" if meta else "4.39M", TEAL, "dual-tower hybrid")
+    metric_card(c[0], "Model parameters", f"{meta['n_params']/1e6:.2f}M" if meta else "4.40M", TEAL, "dual-tower hybrid")
     metric_card(c[1], "Input features", f"{DATA_CFG.n_total_features}", GREEN, "technical + macro + sentiment")
-    metric_card(c[2], "History", f"~{bars//250}y" if bars else "~26y", NAVY, f"{bars:,} daily bars" if bars else "daily bars")
-    metric_card(c[3], "Forecast horizon", f"{DATA_CFG.horizon} days", AMBER, "multi-step, probabilistic")
+    metric_card(c[2], "History", f"~{bars//6000}y" if bars else "~10y", NAVY,
+                f"{bars:,} hourly (H1) bars" if bars else "H1 bars")
+    metric_card(c[3], "Forecast horizon", f"{DATA_CFG.horizon} bars", AMBER, "10h ahead, multi-step probabilistic")
     st.caption("Model & baseline directional-accuracy figures are on the **Results & Baselines** page.")
 
     st.markdown("")
@@ -501,7 +501,7 @@ if page.startswith("🏠"):
         "assume linearity and stationarity that currency data routinely violates. This project builds an "
         "**AI-driven framework for multi-step forecasting of the XAU/USD (gold) exchange rate**. Its core is a "
         "**Hybrid CNN-LSTM-Transformer** that fuses three real data streams into one model and forecasts the next "
-        "**10 trading days** together with a calibrated uncertainty band — so it predicts not just the move, but "
+        "**10 hourly bars (10h ahead)** together with a calibrated uncertainty band — so it predicts not just the move, but "
         "how confident it is. Every result is measured honestly against classical baselines under a leakage-free, "
         "regime-aware protocol.")
 
@@ -510,7 +510,7 @@ if page.startswith("🏠"):
         f"<div style='background:#0F172A;color:#CBD5E1;border-radius:10px;padding:14px 16px;font-size:14px'>"
         f"<b style='color:{TEAL_L}'>Price + Macro + News-sentiment</b> &nbsp;→&nbsp; "
         f"CNN (local patterns) → cross-attention fusion → Transformer (global context) → Bi-LSTM/GRU (memory) "
-        f"→ &nbsp;<b style='color:{TEAL_L}'>10-day forecast + confidence band</b></div>",
+        f"→ &nbsp;<b style='color:{TEAL_L}'>10-bar (10h) forecast + confidence band</b></div>",
         unsafe_allow_html=True)
 
     g1, g2 = st.columns(2)
@@ -527,7 +527,7 @@ if page.startswith("🏠"):
         st.subheader("🔭 Scope & approach")
         st.markdown(
             f"- Instruments: **gold (XAU/USD), silver (XAG/USD) & euro (EUR/USD)** — separate per-pair pipelines "
-            f"(currently viewing **{PCFG.label}**), daily bars\n"
+            f"(currently viewing **{PCFG.label}**), hourly (H1) bars\n"
             f"- **{DATA_CFG.n_total_features} engineered features** across 3 streams, 60-bar lookback\n"
             "- **Two-pipeline** design: data extraction/verification, then train/test\n"
             "- Training: **freeze-and-tune**, Gaussian-NLL heads, modality masking, deep supervision\n"
@@ -610,7 +610,7 @@ elif page.startswith("🧱"):
 # ===================== 3. DATA & FEATURES =====================
 elif page.startswith("📊"):
     st.title("📊 Data & Feature Engineering")
-    st.markdown("Three real, incrementally-cached streams are aligned to a common daily grid, giving "
+    st.markdown("Three real, incrementally-cached streams are aligned to a common hourly (H1) grid, giving "
                 f"**{DATA_CFG.n_total_features} features** per bar over a 60-bar lookback window.")
     from data.pairs import panel_csv_path
     _ppath = panel_csv_path(PAIR)
@@ -790,7 +790,7 @@ elif page.startswith("🔮"):
     st.subheader("🔮 FX Price Predict — live, out-of-sample")
     st.markdown(f"This runs the **model pipeline from the saved model on fresh data**: it fetches **live "
                 f"{PCFG.label} price and macro data** (and the latest cached news sentiment) for the last 60 bars "
-                f"days, engineers the features, and forecasts the **next 10 trading days from today** — a genuine "
+                f"bars, engineers the features, and forecasts the **next 10 hourly bars (10h) from now** — a genuine "
                 f"out-of-sample prediction (no actual to compare against yet).")
 
     st.markdown("**🗓️ Upcoming scheduled macro events** (shared across pairs — US Fed calendar)")
@@ -849,7 +849,7 @@ elif page.startswith("🔮"):
         d1 = "BUY" if fc[0] > 0 else "SELL"
         cc = st.columns(3)
         metric_card(cc[0], "Next-day direction", d1, GREEN if d1 == "BUY" else AMBER)
-        metric_card(cc[1], "10-day predicted move", f"{(np.exp(fc[-1])-1)*100:+.2f}%", TEAL, "cumulative")
+        metric_card(cc[1], "10-bar (10h) predicted move", f"{(np.exp(fc[-1])-1)*100:+.2f}%", TEAL, "cumulative")
         metric_card(cc[2], "Predicted price (t+10)", f"${price_path[-1]:,.2f}", NAVY, f"from ${F['last_close']:,.2f}")
         st.caption("Price and macro are fetched **live**; news uses the up-to-date **cached archive** by default "
                    "(tick the box to also pull fresh headlines live). News coverage is inherently sparse "
@@ -1009,7 +1009,7 @@ elif page.startswith("🔮"):
                 f"XGBoost expert, whose trees assign the sentiment columns ~0 importance — so sentiment's "
                 f"end-to-end influence is diluted to ≈{(1-trust)*deep_sent_pct:.0f}%. This is a *learned* "
                 f"allocation, consistent with the coverage-falsification experiment: even at 100% news coverage, "
-                f"headline sentiment adds no measurable directional accuracy on daily gold.", icon="🔎")
+                f"headline sentiment adds no measurable directional accuracy on gold (H1).", icon="🔎")
         except Exception:
             st.info(f"Technical ~{grp_pct['Technical / FX']:.0f}%, macro ~{grp_pct['Macro']:.0f}%, "
                     f"sentiment ~{grp_pct['News sentiment']:.0f}%.", icon="🔎")
@@ -1185,120 +1185,3 @@ elif page.startswith("📈"):
                     f"The single-seed (seed 9) result is the comparison table above; the ablation and "
                     f"cross-pair analyses are queued for the same round.", icon="🧪")
 
-    # ---- GOLD deep-dive: 3-seed stability, TGC, ablation, cross-pair ----
-    # These are gold-specific project analyses (run_multi_seed.py / roadmap).
-    if PCFG.name == DEFAULT_PAIR and summ:
-        st.divider()
-        st.subheader("🥇 Gold deep-dive — 3-seed stability, Trend-Gated Committee, ablation")
-        st.caption("⏳ **DAILY-ERA (historical, ~25y daily bars) — superseded by the H1 results above.** "
-                   "Kept for the record; the H1 canonical numbers are the per-pair block at the top of this page.")
-        n_test = (meta.get("split", {}).get("test") if meta else None) or 962
-        hyb = summ["Hybrid_CNN_LSTM_Transformer"]["DirectionalAccuracy"]["mean"]
-        garch = summ.get("GARCH", {}).get("DirectionalAccuracy", {}).get("mean")
-        arima = summ.get("ARIMA", {}).get("DirectionalAccuracy", {}).get("mean")
-        hyb_mae = summ["Hybrid_CNN_LSTM_Transformer"]["MAE"]["mean"]
-        road = load_json("results/roadmap_summary.json") or {}
-        tgc = road.get("trend_gated_committee")
-        mc = st.columns(4)
-        _sub = (tgc or {}).get("selected_subset", {})
-        _edge = _sub.get("tgc_edge_vs_naive_pp")
-        if tgc:
-            metric_card(mc[0], "TGC DirAcc (daily)", f"{tgc['origin_rule']['diracc']:.3f}",
-                        SLATE, f"at {tgc['origin_rule']['coverage']*100:.0f}% coverage")
-        else:
-            metric_card(mc[0], "Hybrid Directional Acc.", f"{hyb:.3f}" if hyb else "—", TEAL, "3-seed mean")
-        metric_card(mc[1], "Subset naive baseline",
-                    f"{_sub.get('best_naive_diracc', float('nan')):.3f}" if _sub else "—",
-                    NAVY, "best fixed rule on same gated origins")
-        metric_card(mc[2], "True edge vs naive", f"{_edge:+.1f}pp" if _edge is not None else "—",
-                    GREEN if (_edge or 0) > 0.5 else SLATE, "the honest skill measure")
-        metric_card(mc[3], "Hybrid (unfiltered)", f"{hyb:.3f}" if hyb else "—", TEAL, "3-seed mean, all bars")
-        if tgc:
-            o = tgc["origin_rule"]
-            st.warning(
-                f"**Trend-Gated Committee — with the base-rate control.** The daily headline was "
-                f"**{o['diracc']:.4f} at {o['coverage']*100:.1f}% coverage**, but the drift gate selects "
-                f"origins that trend {_sub.get('up_fraction', 0)*100:.0f}% one way, so the honest benchmark is "
-                f"the best fixed rule on those **same** origins ({_sub.get('best_naive_diracc', 0):.4f}). The "
-                f"committee's true edge is **{_edge:+.1f}pp** — within noise. Both daily and H1 selective "
-                f"accuracy dissolve under this control; the base-rate check is itself the contribution.", icon="⚖️")
-        st.markdown("")
-        nice = {"Hybrid_CNN_LSTM_Transformer": "Hybrid CNN-LSTM-Transformer",
-                "GARCH": "GARCH (AR1-GARCH1,1)", "ARIMA": "ARIMA (walk-forward)"}
-        rows = []
-        for k, label in nice.items():
-            if k in summ:
-                rows.append({"Model": label,
-                             "DirAcc (mean)": round(summ[k]["DirectionalAccuracy"]["mean"], 4),
-                             "DirAcc (std)": round(summ[k]["DirectionalAccuracy"]["std"], 4),
-                             "MAE": round(summ[k]["MAE"]["mean"], 5),
-                             "RMSE": round(summ[k]["RMSE"]["mean"], 5)})
-        df = pd.DataFrame(rows).sort_values("DirAcc (mean)", ascending=False)
-        st.subheader(f"Walk-forward comparison ({n_test} test windows, 3 seeds)")
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        vals = {nice[k]: summ[k]["DirectionalAccuracy"]["values"] for k in nice if k in summ}
-        fig = go.Figure()
-        for name, v in vals.items():
-            fig.add_trace(go.Bar(name=name, x=["seed 9", "seed 36", "seed 99"], y=v))
-        fig.update_layout(barmode="group", height=320, template="plotly_white",
-                          yaxis_title="Directional accuracy", yaxis_range=[0.45, 0.6],
-                          margin=dict(l=0, r=0, t=10, b=0))
-        fig.add_hline(y=0.5, line_dash="dot", line_color=SLATE, annotation_text="coin flip")
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("Ablation — sentiment diffusion feature")
-        st.table(pd.DataFrame([
-            {"Configuration": "Without sent_diffusion (30 feat)", "DirAcc": 0.5006},
-            {"Configuration": "Placebo — shuffled diffusion (31 feat)", "DirAcc": 0.5209},
-            {"Configuration": "With real sent_diffusion (31 feat)", "DirAcc": 0.5345},
-        ]))
-        st.caption("The +3.4pp gain decomposes into ~2.0pp added-channel effect (a noise column achieves it) "
-                   "and ~1.4pp genuine diffusion signal. See report Section 6a.")
-
-        # ---- cross-pair zero-shot transfer ----
-        xp = load_json("results/cross_pair_transfer.json")
-        if xp and xp.get("pairs"):
-            ftj = load_json("results/cross_pair_finetune.json") or {"pairs": {}}
-            st.divider()
-            st.subheader("🌍 Multi-pair — cross-pair transfer (zero-shot & fine-tuned)")
-            st.markdown(
-                "The **gold-trained Hybrid** evaluated on other pairs built through the same pipeline. Each pair "
-                "uses its **own** train-split normalisation, its own walk-forward XGBoost expert (refit every 14 "
-                "windows), and is compared against its **own** walk-forward AR(1)-GARCH(1,1). *Fine-tuned* = the "
-                "full model briefly re-trained on the pair's own train split (10 epochs, 0.125× LR, early-stopped "
-                "on the pair's validation). These tickers have no news archive, so every bar carries the 'none' "
-                "sentiment state — the condition modality masking trains for.")
-            rows = [{"Pair": "XAU/USD (gold — native, trained)", "Bars": "6,489", "Test windows": 963,
-                     "Hybrid DirAcc": 0.5581, "Fine-tuned": None, "WF-expert alone": None, "Own GARCH": 0.5768}]
-            chart = {"XAU/USD\n(native)": (0.5581, None, 0.5768)}
-            for pr, v in xp["pairs"].items():
-                f = ftj["pairs"].get(pr, {})
-                rows.append({"Pair": f"{pr} (zero-shot)", "Bars": f"{v['bars']:,}",
-                             "Test windows": v["test_windows"],
-                             "Hybrid DirAcc": round(v["hybrid_zero_shot"]["diracc"], 4),
-                             "Fine-tuned": round(f["finetuned_diracc"], 4) if f else None,
-                             "WF-expert alone": round(v["wf_expert_alone_diracc"], 4),
-                             "Own GARCH": round(v["garch"]["diracc"], 4)})
-                chart[pr + "\n(zero-shot)"] = (v["hybrid_zero_shot"]["diracc"],
-                                               v["wf_expert_alone_diracc"], v["garch"]["diracc"])
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-            xfig = go.Figure()
-            labels = list(chart.keys())
-            xfig.add_trace(go.Bar(name="Hybrid", x=labels, y=[c[0] for c in chart.values()], marker_color=TEAL))
-            xfig.add_trace(go.Bar(name="WF-expert (pair-local)", x=labels,
-                                  y=[c[1] for c in chart.values()], marker_color=GREEN))
-            xfig.add_trace(go.Bar(name="Own GARCH", x=labels, y=[c[2] for c in chart.values()], marker_color=NAVY))
-            xfig.add_hline(y=0.5, line_dash="dot", line_color=SLATE, annotation_text="coin flip")
-            xfig.update_layout(barmode="group", height=320, template="plotly_white",
-                               yaxis_title="Directional accuracy", yaxis_range=[0.45, 0.62],
-                               margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(xfig, use_container_width=True)
-            st.info(
-                "**Three findings.** ① Transfer **succeeds within the asset complex**: gold→silver works "
-                "zero-shot (0.52 vs silver's own GARCH at 0.489), and fine-tuning adds nothing — the gold weights "
-                "are already near-optimal for silver. ② Cross-asset-class, **fine-tuning repairs the euro** from "
-                "below coin-flip to above its own GARCH (0.496 → 0.505 vs 0.483), but light fine-tuning cannot "
-                "reorganise deep weights for a different asset class. ③ The pair-local walk-forward expert "
-                "(**0.575** on EUR/USD) shows the *methodology* is what transfers — full per-pair training is the "
-                "future-work path.", icon="🌍")

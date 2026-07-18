@@ -343,13 +343,9 @@ if __name__ == "__main__":
                         help="'panel' (default): train on the pre-built exports/feature_panel.csv "
                              "from PIPELINE 1 (build_dataset.py) -- no live fetching. 'real': fetch "
                              "live inside the run (slow/fragile). 'synthetic': generated data.")
-    parser.add_argument("--interval", type=str, default="1d",
-                        help="'1d' daily bars (default: full 25-year history, natural alignment "
-                             "with the daily/monthly macro cadence -- the hourly round showed "
-                             "intraday scale favours the AR baselines and starves the macro "
-                             "features), '1h' hourly (730-day cap), minute bars (60-day cap). "
-                             "Yahoo has no native 12h interval; daily dominates a resampled "
-                             "12h on bar count (6,485 vs ~1,460) and on macro alignment.")
+    parser.add_argument("--interval", type=str, default="1h",
+                        help="'1h' hourly (default/canonical: the project is fixed on XAUUSD H1). "
+                             "'1d'/'4h' retained for legacy runs only.")
     parser.add_argument("--signal_strength", type=float, default=None)
     args = parser.parse_args()
 

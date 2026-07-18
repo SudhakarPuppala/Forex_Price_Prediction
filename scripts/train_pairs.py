@@ -271,9 +271,10 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pairs", nargs="+", default=ALL_PAIRS)
-    ap.add_argument("--interval", default="4h",
-                    help="candle interval: 1h (H1 pipeline), 4h, or 1d (legacy daily)")
+    ap.add_argument("--pairs", nargs="+", default=["XAU/USD"],
+                    help="focus is XAUUSD 1H; pass e.g. --pairs XAG/USD EUR/USD to include others")
+    ap.add_argument("--interval", default="1h",
+                    help="candle interval: 1h (H1, default/canonical). 4h/1d retained for legacy runs only")
     ap.add_argument("--source", default="real", choices=["real", "panel"],
                     help="'real' rebuilds from the feeds; 'panel' loads the frozen "
                          "feature panel (fast -- use for smoke runs)")
