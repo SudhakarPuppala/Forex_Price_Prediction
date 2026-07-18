@@ -49,6 +49,18 @@ strided test origins by default (statistically ample). Override with
 import os; os.environ["FOREX_BASELINE_MAX_ORIGINS"] = "1500"
 ```
 
+### Speed knobs for `run_multi_seed` at H1
+The Hybrid's walk-forward XGBoost expert refits every `FOREX_WF_REFIT_EVERY`
+test windows. The daily default (14) means ~665 refits at H1 (~10h/seed); 100
+gives ~93 refits (default now). To skip the walk-forward expert entirely and
+report the static expert (fastest), set `FOREX_WF_EXPERT=0`.
+
+```python
+import os
+os.environ["FOREX_WF_REFIT_EVERY"] = "100"   # ~93 refits instead of ~665
+# os.environ["FOREX_WF_EXPERT"] = "0"         # or skip it: static expert only
+```
+
 ## Notes
 - Everything reads/writes under the repo; download `results/` and
   `exports/dashboard/XAUUSD/` afterwards to bring checkpoints/metrics back.

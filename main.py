@@ -225,19 +225,24 @@ def run(
     # test windows, on strictly-past data only) and the Hybrid is evaluated
     # with those adaptive expert inputs -- the like-for-like comparison with
     # the walk-forward baselines. The static evaluation is printed alongside.
-    if source in ("real", "panel") and not quick:
+    # refit_every was tuned on DAILY data (~962 test windows -> 14 = ~69 refits).
+    # At H1 the test set is ~9,300 windows, so 14 means ~665 refits, each fitting
+    # XGBoost on the full 50k+ history -- ~10h for ONE seed. The daily cadence
+    # sweep showed the adaptivity curve is flat past ~14 windows, so scale the
+    # cadence with the data: default 100 at H1 (~93 refits, ~4 trading days).
+    # FOREX_WF_REFIT_EVERY overrides; FOREX_WF_EXPERT=0 skips the walk-forward
+    # entirely and reports the (already-computed) STATIC expert -- fastest, and
+    # given no directional edge the adaptivity buys little.
+    _wf_on = os.environ.get("FOREX_WF_EXPERT", "1") == "1"
+    if source in ("real", "panel") and not quick and _wf_on:
         from baselines.xgboost_baseline import walk_forward_expert_preds
         rep_static, _, _, _ = evaluate_deep_model(hybrid, test_ds_xgb, "Hybrid_static", device=device)
         print(f"[adaptive] static-expert Hybrid DirAcc: {rep_static['overall']['DirectionalAccuracy']:.4f} "
               f"(expert frozen at the train boundary)")
-        # refit_every=14 -- the chosen OPERATING POINT from the cadence sweep
-        # (static 0.5339 -> @42 0.5486 -> @14 0.5606 -> @5 0.5618): the curve
-        # flattens past 14 (+0.1pp for 3x the refit compute), so fortnightly
-        # refits capture essentially all of the adaptivity edge that the
-        # per-origin-refit GARCH baseline enjoys.
-        wf_preds = walk_forward_expert_preds(train_ds, val_ds, test_ds, refit_every=14)
+        _refit = int(os.environ.get("FOREX_WF_REFIT_EVERY", "100"))
+        wf_preds = walk_forward_expert_preds(train_ds, val_ds, test_ds, refit_every=_refit)
         test_ds_xgb = XGBAugmentedDataset(test_ds, xgb, preds=wf_preds, garch_preds=_g(test_ds))
-        reports_key_note = "adaptive walk-forward expert"
+        reports_key_note = f"adaptive walk-forward expert (refit_every={_refit})"
     else:
         rep_static = None
         reports_key_note = "static expert"
