@@ -52,8 +52,11 @@ te_x = XGBAugmentedDataset(te, xgb, preds=wf,
 hybrid = HybridCNNLSTMTransformer()
 hybrid.load_state_dict(torch.load(os.path.join(ckpt, "hybrid.pt"), map_location="cpu", weights_only=True))
 rep, y_true, y_pred, band = evaluate_deep_model(hybrid, te_x, "vol", device="cpu")
-assert abs(rep["overall"]["DirectionalAccuracy"] - 0.5126) < 1e-2, "reproduction failed"
-print(f"reproduction OK (DirAcc {rep['overall']['DirectionalAccuracy']:.4f})")
+import json
+_pub = json.load(open("results/pair_metrics/XAUUSD.json"))["hybrid"]["DirAcc"]
+assert abs(rep["overall"]["DirectionalAccuracy"] - _pub) < 1e-2, \
+    f"reproduction failed: {rep['overall']['DirectionalAccuracy']:.4f} vs published {_pub:.4f}"
+print(f"reproduction OK (DirAcc {rep['overall']['DirectionalAccuracy']:.4f} ~= published {_pub:.4f})")
 
 n = len(y_true)
 origins = list(te.indices)[:n]
