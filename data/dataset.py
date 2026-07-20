@@ -301,6 +301,8 @@ class FXWindowDataset(Dataset):
             self.indices.append(t)
 
         self._log_close = log_close
+        import os as _os
+        self._magnitude_target = _os.environ.get("FOREX_TARGET", "direction") == "magnitude"
 
     def __len__(self):
         return len(self.indices)
@@ -312,6 +314,13 @@ class FXWindowDataset(Dataset):
         x_text = x[:, N_QUANT_FEATURES:]                         # (T, 12)
         future = self._log_close[t + 1 : t + 1 + self.horizon]
         y = future - self._log_close[t]  # cumulative log-return targets, (k,)
+        if self._magnitude_target:
+            # MAGNITUDE experiment (FOREX_TARGET=magnitude): predict |move|,
+            # not its sign -- the one framing with a measured positive prior
+            # (atr_pct forecasts future vol at rho~0.6; the sigma head reaches
+            # 0.31 untrained-for-it). Same (k,) shape, so the whole model/loss
+            # stack is reused; the directional loss term is zeroed upstream.
+            y = np.abs(y)
         regime_ctx = np.array([self.panel.realized_vol[t], self.panel.atr[t]], dtype=np.float32)
 
         return (

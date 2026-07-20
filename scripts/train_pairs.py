@@ -159,7 +159,16 @@ def _resolve_device(device: str) -> str:
 def run_pair(pair: str, interval: str = "4h", bars: int = None,
              epochs: int = None, source: str = "panel",
              train_stride: int = 1, refit_every: int = 14,
-             device: str = "auto", batch_size: int = None) -> dict:
+             device: str = "auto", batch_size: int = None,
+             target: str = "direction") -> dict:
+    magnitude = target == "magnitude"
+    if magnitude:
+        # Must be set BEFORE any FXWindowDataset is constructed (the flag is
+        # read in __init__). Sign-based losses are meaningless on |y|.
+        os.environ["FOREX_TARGET"] = "magnitude"
+        TRAIN_CFG.directional_loss_weight = 0.0
+        print("[train_pairs] MAGNITUDE-TARGET experiment: y = |cumulative return| "
+              "per horizon; directional loss zeroed; scoring vs atr_pct.")
     cfg = get_pair(pair)
     smoke = bars is not None
     print(f"\n===== {cfg.name} ({cfg.label}) @ {interval}"
@@ -229,20 +238,55 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
                                 seed=SEED)
     rep, y_true, y_pred, band = evaluate_deep_model(hybrid, te_x, f"Hybrid_{cfg.slug}", device=dev)
 
-    # Val-tuned per-horizon sign thresholds (reported ALONGSIDE raw, never
-    # instead): raw sign(pred) under-weights the drift and scored below the
-    # always-up base rate at H1; tuning the decision threshold on VAL is the
-    # split's purpose and touches nothing in test.
-    from training.evaluate import (collect_predictions, calibrate_sign_thresholds,
-                                   calibrated_directional_accuracy)
-    v_true, v_pred, _, _, _ = collect_predictions(hybrid, va_x, device=dev)
-    taus = calibrate_sign_thresholds(v_true, v_pred)
-    cal_da = calibrated_directional_accuracy(y_true, y_pred, taus)
-    base_up = float((y_true > 0).mean())
-    base_rate = max(base_up, 1 - base_up)
-    print(f"[train_pairs] {cfg.slug}: val-calibrated DirAcc {cal_da:.4f} "
-          f"(raw {rep['overall']['DirectionalAccuracy']:.4f}, always-up base {base_rate:.4f}, "
-          f"edge {(cal_da - base_rate) * 100:+.1f}pp)")
+    mag_metrics = None
+    if magnitude:
+        # ---- MAGNITUDE scoring: the honest bar is beating atr_pct ----
+        import pandas as pd
+        from scipy.stats import spearmanr
+        names = list(panel.feature_names)
+        origins = np.array(te.indices)[: len(y_true)]
+        atrp = panel.features[:, names.index("atr_pct")][origins]
+        act = y_true[:, -1]                     # actual |10-bar move|
+        prd = y_pred[:, -1]
+        # adaptive rolling-median split; window shrinks for smoke-sized samples
+        _w = min(500, max(20, len(act) // 4))
+        _mp = min(100, max(10, _w // 2))
+        roll = pd.Series(act).rolling(_w, min_periods=_mp).median().to_numpy()
+        ok = np.isfinite(roll)
+        y_hi = act > roll
+        def _acc(x):
+            thr = pd.Series(x).rolling(_w, min_periods=_mp).median().to_numpy()
+            return float(((x[ok] > thr[ok]) == y_hi[ok]).mean())
+        mag_metrics = {
+            "model_spearman": float(spearmanr(prd[ok], act[ok]).statistic),
+            "atr_pct_spearman": float(spearmanr(atrp[ok], act[ok]).statistic),
+            "model_large_move_acc": _acc(prd),
+            "atr_pct_large_move_acc": _acc(atrp),
+            "base_rate": float(y_hi[ok].mean()),
+        }
+        print(f"[train_pairs] {cfg.slug} MAGNITUDE: model spearman "
+              f"{mag_metrics['model_spearman']:+.3f} vs atr_pct "
+              f"{mag_metrics['atr_pct_spearman']:+.3f} | large-move acc "
+              f"{mag_metrics['model_large_move_acc']:.3f} vs "
+              f"{mag_metrics['atr_pct_large_move_acc']:.3f} "
+              f"(base {mag_metrics['base_rate']:.3f}) -> "
+              f"{'MODEL BEATS atr_pct' if mag_metrics['model_large_move_acc'] > mag_metrics['atr_pct_large_move_acc'] and mag_metrics['model_spearman'] > mag_metrics['atr_pct_spearman'] else 'atr_pct still ahead'}")
+        cal_da, taus, base_rate = float("nan"), np.zeros(DATA_CFG.horizon), float("nan")
+    else:
+        # Val-tuned per-horizon sign thresholds (reported ALONGSIDE raw, never
+        # instead): raw sign(pred) under-weights the drift and scored below the
+        # always-up base rate at H1; tuning the decision threshold on VAL is the
+        # split's purpose and touches nothing in test.
+        from training.evaluate import (collect_predictions, calibrate_sign_thresholds,
+                                       calibrated_directional_accuracy)
+        v_true, v_pred, _, _, _ = collect_predictions(hybrid, va_x, device=dev)
+        taus = calibrate_sign_thresholds(v_true, v_pred)
+        cal_da = calibrated_directional_accuracy(y_true, y_pred, taus)
+        base_up = float((y_true > 0).mean())
+        base_rate = max(base_up, 1 - base_up)
+        print(f"[train_pairs] {cfg.slug}: val-calibrated DirAcc {cal_da:.4f} "
+              f"(raw {rep['overall']['DirectionalAccuracy']:.4f}, always-up base {base_rate:.4f}, "
+              f"edge {(cal_da - base_rate) * 100:+.1f}pp)")
 
     # baselines on the same test windows
     logc = np.log(np.asarray(panel.close, dtype=np.float64))
@@ -260,6 +304,11 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
     # save per-pair checkpoint (dashboard loads exports/dashboard/<slug>/)
     import joblib
     ckpt = checkpoint_dir(pair)
+    if magnitude:
+        # keep the magnitude experiment fully separate from the direction
+        # checkpoint the dashboard serves
+        ckpt = os.path.join(ckpt, "magnitude")
+        os.makedirs(ckpt, exist_ok=True)
     torch.save(hybrid.state_dict(), os.path.join(ckpt, "hybrid.pt"))
     joblib.dump(xgb.model, os.path.join(ckpt, "xgb.pkl"))
     # persist this pair's GARCH expert for the dashboard/backtest paths
@@ -271,6 +320,7 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
     import datetime as _dt
     meta = {
         "pair": cfg.name, "slug": cfg.slug, "label": cfg.label,
+        "target": target, "magnitude_vs_atr": mag_metrics,
         "seed": SEED, "saved_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "interval": interval,
         # Mark dry runs so a 2-epoch/500-bar checkpoint can never be mistaken
@@ -295,7 +345,8 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
     }
     json.dump(meta, open(os.path.join(ckpt, "meta.json"), "w"), indent=2, default=str)
     os.makedirs("results/pair_metrics", exist_ok=True)
-    json.dump(meta, open(f"results/pair_metrics/{cfg.slug}.json", "w"), indent=2, default=float)
+    _mfile = f"{cfg.slug}_magnitude" if magnitude else cfg.slug
+    json.dump(meta, open(f"results/pair_metrics/{_mfile}.json", "w"), indent=2, default=float)
     print(f"[train_pairs] {cfg.slug}: Hybrid DirAcc {meta['hybrid']['DirAcc']:.4f} "
           f"MAE {meta['hybrid']['MAE']:.5f} | wf-expert {wf_da:.4f} | "
           f"GARCH {garch_m['DirAcc']:.4f} | ARIMA {arima_m['DirAcc'] if arima_m else float('nan'):.4f}")
@@ -325,6 +376,10 @@ def main():
                          "(H1 default 100; 14 would mean ~664 refits/pair).")
     ap.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"],
                     help="'auto' uses CUDA when available (Colab GPU), else CPU.")
+    ap.add_argument("--target", default="direction", choices=["direction", "magnitude"],
+                    help="'magnitude' trains on |cumulative return| per horizon (the "
+                         "volatility experiment); outputs are namespaced *_magnitude "
+                         "and scored against the atr_pct baseline.")
     ap.add_argument("--batch-size", type=int, default=None,
                     help="override batch size (auto: 256 on GPU, 32 on CPU).")
     args = ap.parse_args()
@@ -335,10 +390,11 @@ def main():
             pair, interval=args.interval, bars=args.bars,
             epochs=args.epochs, source=args.source,
             train_stride=args.train_stride, refit_every=args.refit_every,
-            device=args.device, batch_size=args.batch_size)
+            device=args.device, batch_size=args.batch_size, target=args.target)
     os.makedirs("results/pair_metrics", exist_ok=True)
-    json.dump(summary, open("results/pair_metrics/all_pairs.json", "w"), indent=2, default=float)
-    print("\n[train_pairs] wrote results/pair_metrics/all_pairs.json")
+    _afile = "all_pairs_magnitude" if args.target == "magnitude" else "all_pairs"
+    json.dump(summary, open(f"results/pair_metrics/{_afile}.json", "w"), indent=2, default=float)
+    print(f"\n[train_pairs] wrote results/pair_metrics/{_afile}.json")
     print(f"{'pair':10s} {'Hybrid':>8s} {'wf-exp':>8s} {'GARCH':>8s} {'ARIMA':>8s}")
     for slug, m in summary.items():
         a = m["arima"]["DirAcc"] if m["arima"] else float("nan")

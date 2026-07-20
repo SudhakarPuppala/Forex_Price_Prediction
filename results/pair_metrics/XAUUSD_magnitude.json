@@ -1,0 +1,100 @@
+{
+  "pair": "XAU/USD",
+  "slug": "XAUUSD",
+  "label": "Gold (XAU/USD)",
+  "target": "magnitude",
+  "magnitude_vs_atr": {
+    "model_spearman": 0.2082350807183022,
+    "atr_pct_spearman": 0.1675566842009795,
+    "model_large_move_acc": 0.6174496644295302,
+    "atr_pct_large_move_acc": 0.5771812080536913,
+    "base_rate": 0.436241610738255
+  },
+  "seed": 9,
+  "saved_at": "2026-07-21T00:41:02",
+  "interval": "1h",
+  "smoke": true,
+  "epochs": 2,
+  "feature_names": [
+    "ret_open",
+    "ret_high",
+    "ret_low",
+    "ret_close",
+    "rsi",
+    "macd_hist",
+    "bb_width",
+    "volume_z",
+    "atr_pct",
+    "roc_10",
+    "stoch_k",
+    "ema_ratio",
+    "env_dev20",
+    "bb_pctb",
+    "drift_5",
+    "drift_21",
+    "drift_60",
+    "drift_tstat",
+    "rate_z21",
+    "yield_chg5",
+    "dollar_ret5",
+    "cpi_yoy",
+    "cpi_mom",
+    "days_since_cpi",
+    "sent_mean",
+    "sent_std",
+    "sent_min",
+    "sent_max",
+    "sent_decay",
+    "sent_momentum",
+    "sent_vol",
+    "sent_diffusion",
+    "headline_count_z",
+    "sig_buy",
+    "sig_sell",
+    "sig_hold",
+    "sig_none"
+  ],
+  "lookback": 60,
+  "horizon": 10,
+  "n_total": 37,
+  "bars": 1200,
+  "date_start": "2026-05-01 04:00:00",
+  "date_end": "2026-07-16 20:00:00",
+  "split": {
+    "train": 260,
+    "val": 60,
+    "test": 169
+  },
+  "hybrid": {
+    "DirAcc": 1.0,
+    "MAE": 0.0029920306988060474,
+    "RMSE": 0.0043174088932573795,
+    "DirAcc_calibrated": NaN
+  },
+  "calibration": {
+    "sign_thresholds": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "always_up_base_rate": NaN,
+    "edge_vs_base_pp": NaN
+  },
+  "wf_expert_diracc": 1.0,
+  "garch": {
+    "DirAcc": 0.5751479289940828,
+    "MAE": 0.004804801593338553
+  },
+  "arima": {
+    "DirAcc": 0.5899408284023668,
+    "MAE": 0.004853736312385165
+  },
+  "n_params": 4401767
+}
