@@ -5,17 +5,17 @@
     "label": "Gold (XAU/USD)",
     "target": "magnitude",
     "magnitude_vs_atr": {
-      "model_spearman": 0.2082350807183022,
-      "atr_pct_spearman": 0.1675566842009795,
-      "model_large_move_acc": 0.6174496644295302,
-      "atr_pct_large_move_acc": 0.5771812080536913,
-      "base_rate": 0.436241610738255
+      "model_spearman": 0.32872567445085776,
+      "atr_pct_spearman": 0.30858720811341706,
+      "model_large_move_acc": 0.5519678190911068,
+      "atr_pct_large_move_acc": 0.5405522939769515,
+      "base_rate": 0.5045662100456622
     },
     "seed": 9,
-    "saved_at": "2026-07-21T00:41:02",
+    "saved_at": "2026-07-21T10:45:54",
     "interval": "1h",
-    "smoke": true,
-    "epochs": 2,
+    "smoke": false,
+    "epochs": 25,
     "feature_names": [
       "ret_open",
       "ret_high",
@@ -58,18 +58,18 @@
     "lookback": 60,
     "horizon": 10,
     "n_total": 37,
-    "bars": 1200,
-    "date_start": "2026-05-01 04:00:00",
+    "bars": 62049,
+    "date_start": "2016-01-04 01:00:00",
     "date_end": "2026-07-16 20:00:00",
     "split": {
-      "train": 260,
-      "val": 60,
-      "test": 169
+      "train": 14458,
+      "val": 3102,
+      "test": 9297
     },
     "hybrid": {
-      "DirAcc": 1.0,
-      "MAE": 0.0029920306988060474,
-      "RMSE": 0.0043174088932573795,
+      "DirAcc": 0.9997526083682908,
+      "MAE": 0.003186638467013836,
+      "RMSE": 0.005018920637667179,
       "DirAcc_calibrated": NaN
     },
     "calibration": {
@@ -88,14 +88,14 @@
       "always_up_base_rate": NaN,
       "edge_vs_base_pp": NaN
     },
-    "wf_expert_diracc": 1.0,
+    "wf_expert_diracc": 0.9997526083682908,
     "garch": {
-      "DirAcc": 0.5751479289940828,
-      "MAE": 0.004804801593338553
+      "DirAcc": 0.5328600623857158,
+      "MAE": 0.004689416604452952
     },
     "arima": {
-      "DirAcc": 0.5899408284023668,
-      "MAE": 0.004853736312385165
+      "DirAcc": 0.5142303969022265,
+      "MAE": 0.004691886189837168
     },
     "n_params": 4401767
   }

@@ -26,3 +26,8 @@ exports/mt5/
 # recorded evidence for each evaluation round.
 dashboard/__pycache__/
 results/run_multi_seed_error.log
+
+# Magnitude multi-seed: keep metrics JSON + meta, skip the 18MB/seed binaries
+exports/dashboard/*/magnitude/seed*/hybrid.pt
+exports/dashboard/*/magnitude/seed*/xgb.pkl
+exports/dashboard/*/magnitude/seed*/garch_expert_preds.npz

@@ -1,0 +1,113 @@
+{
+  "pair": "XAU/USD",
+  "slug": "XAUUSD",
+  "interval": "1h",
+  "seeds": [
+    9,
+    36,
+    99
+  ],
+  "n_seeds_scored": 3,
+  "per_seed": [
+    {
+      "model_spearman": 0.32872567445085776,
+      "atr_pct_spearman": 0.30858720811341706,
+      "model_large_move_acc": 0.5519678190911068,
+      "atr_pct_large_move_acc": 0.5405522939769515,
+      "base_rate": 0.5045662100456622,
+      "seed": 9,
+      "model_spearman_edge": 0.020138466337440708,
+      "model_acc_edge": 0.011415525114155334,
+      "beats_atr_both": true
+    },
+    {
+      "model_spearman": 0.32884633113006967,
+      "atr_pct_spearman": 0.30858720811341706,
+      "model_large_move_acc": 0.5516416612307024,
+      "atr_pct_large_move_acc": 0.5405522939769515,
+      "base_rate": 0.5045662100456622,
+      "seed": 36,
+      "model_spearman_edge": 0.020259123016652614,
+      "model_acc_edge": 0.01108936725375087,
+      "beats_atr_both": true
+    },
+    {
+      "model_spearman": 0.3287489838370072,
+      "atr_pct_spearman": 0.30858720811341706,
+      "model_large_move_acc": 0.5514242226570993,
+      "atr_pct_large_move_acc": 0.5405522939769515,
+      "base_rate": 0.5045662100456622,
+      "seed": 99,
+      "model_spearman_edge": 0.020161775723590125,
+      "model_acc_edge": 0.010871928680147858,
+      "beats_atr_both": true
+    }
+  ],
+  "aggregate": {
+    "model_spearman": {
+      "mean": 0.3287736631393115,
+      "std": 5.225775560484501e-05,
+      "values": [
+        0.32872567445085776,
+        0.32884633113006967,
+        0.3287489838370072
+      ]
+    },
+    "atr_pct_spearman": {
+      "mean": 0.30858720811341706,
+      "std": 0.0,
+      "values": [
+        0.30858720811341706,
+        0.30858720811341706,
+        0.30858720811341706
+      ]
+    },
+    "model_spearman_edge": {
+      "mean": 0.020186455025894483,
+      "std": 5.2257755604845014e-05,
+      "values": [
+        0.020138466337440708,
+        0.020259123016652614,
+        0.020161775723590125
+      ]
+    },
+    "model_large_move_acc": {
+      "mean": 0.5516779009929694,
+      "std": 0.00022339689798397795,
+      "values": [
+        0.5519678190911068,
+        0.5516416612307024,
+        0.5514242226570993
+      ]
+    },
+    "atr_pct_large_move_acc": {
+      "mean": 0.5405522939769515,
+      "std": 0.0,
+      "values": [
+        0.5405522939769515,
+        0.5405522939769515,
+        0.5405522939769515
+      ]
+    },
+    "model_acc_edge": {
+      "mean": 0.011125607016018021,
+      "std": 0.00022339689798397795,
+      "values": [
+        0.011415525114155334,
+        0.01108936725375087,
+        0.010871928680147858
+      ]
+    },
+    "base_rate": {
+      "mean": 0.5045662100456622,
+      "std": 0.0,
+      "values": [
+        0.5045662100456622,
+        0.5045662100456622,
+        0.5045662100456622
+      ]
+    }
+  },
+  "n_seeds_beating_atr_both": 3,
+  "verdict": "ROBUST: model beats atr_pct across all seeds"
+}
