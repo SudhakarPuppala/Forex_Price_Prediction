@@ -4,11 +4,20 @@
   "label": "Gold (XAU/USD)",
   "target": "magnitude",
   "magnitude_vs_atr": {
+    "seed": 9,
     "model_spearman": 0.32872567445085776,
     "atr_pct_spearman": 0.30858720811341706,
+    "garch_sigma_spearman": 0.30426126384010965,
     "model_large_move_acc": 0.5519678190911068,
     "atr_pct_large_move_acc": 0.5405522939769515,
-    "base_rate": 0.5045662100456622
+    "garch_sigma_large_move_acc": 0.5446836268754077,
+    "base_rate": 0.5045662100456622,
+    "model_spearman_edge": 0.020138466337440708,
+    "model_acc_edge": 0.011415525114155334,
+    "beats_atr_both": true,
+    "model_vs_garch_spearman_edge": 0.02446441061074811,
+    "model_vs_garch_acc_edge": 0.007284192215699092,
+    "beats_garch_both": true
   },
   "seed": 9,
   "saved_at": "2026-07-21T12:49:15",

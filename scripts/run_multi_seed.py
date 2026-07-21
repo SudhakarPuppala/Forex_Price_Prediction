@@ -255,22 +255,34 @@ def multi_seed_magnitude(seeds, pair="XAU/USD", interval="1h", source="panel",
         if not mm:
             print(f"[magnitude] seed {seed}: no scoring returned -- skipping")
             continue
-        mm["seed"] = seed
-        mm["model_spearman_edge"] = mm["model_spearman"] - mm["atr_pct_spearman"]
-        mm["model_acc_edge"] = mm["model_large_move_acc"] - mm["atr_pct_large_move_acc"]
-        mm["beats_atr_both"] = bool(mm["model_spearman_edge"] > 0 and mm["model_acc_edge"] > 0)
-        # GARCH-sigma baseline (the classical volatility model; seed-independent,
-        # so identical across seeds -- present when not a smoke run)
-        if "garch_sigma_spearman" in mm:
-            mm["model_vs_garch_spearman_edge"] = mm["model_spearman"] - mm["garch_sigma_spearman"]
-            mm["model_vs_garch_acc_edge"] = mm["model_large_move_acc"] - mm["garch_sigma_large_move_acc"]
-            mm["beats_garch_both"] = bool(mm["model_vs_garch_spearman_edge"] > 0
-                                          and mm["model_vs_garch_acc_edge"] > 0)
+        mm["seed"] = seed          # edges/verdicts computed in summarize_magnitude_rows
         rows.append(mm)
 
     if not rows:
         print("[magnitude] no seeds produced scoring -- aborting summary")
         return None
+    summary = summarize_magnitude_rows(rows, pair, slug, interval, seeds)
+    out = f"results/multi_seed_magnitude_{slug}.json"
+    json.dump(summary, open(out, "w"), indent=2, default=float)
+    print(f"\nWritten to {out}")
+    return summary
+
+
+def summarize_magnitude_rows(rows, pair, slug, interval, seeds):
+    """Aggregate per-seed magnitude scoring rows into the summary JSON + verdicts.
+    Shared by the full sweep (multi_seed_magnitude) and the re-score path
+    (analysis/magnitude_garch_rescore.py) so the ROBUST/FRAGILE/MARGINAL logic
+    lives in exactly one place. Each row is a magnitude_vs_atr dict; GARCH fields
+    (garch_sigma_*) are optional."""
+    for r in rows:
+        r["model_spearman_edge"] = r["model_spearman"] - r["atr_pct_spearman"]
+        r["model_acc_edge"] = r["model_large_move_acc"] - r["atr_pct_large_move_acc"]
+        r["beats_atr_both"] = bool(r["model_spearman_edge"] > 0 and r["model_acc_edge"] > 0)
+        if "garch_sigma_spearman" in r:
+            r["model_vs_garch_spearman_edge"] = r["model_spearman"] - r["garch_sigma_spearman"]
+            r["model_vs_garch_acc_edge"] = r["model_large_move_acc"] - r["garch_sigma_large_move_acc"]
+            r["beats_garch_both"] = bool(r["model_vs_garch_spearman_edge"] > 0
+                                         and r["model_vs_garch_acc_edge"] > 0)
 
     def agg(key):
         v = np.array([r[key] for r in rows], dtype=float)
@@ -327,10 +339,8 @@ def multi_seed_magnitude(seeds, pair="XAU/USD", interval="1h", source="panel",
     if has_garch:
         print(f"seeds beating GARCH-sigma on BOTH:     {summary['n_seeds_beating_garch_both']}/{len(rows)}"
               f"  -> {summary['garch_verdict']}")
-
-    out = f"results/multi_seed_magnitude_{slug}.json"
-    json.dump(summary, open(out, "w"), indent=2, default=float)
-    print(f"\nWritten to {out}")
+    # NB: the caller writes results/multi_seed_magnitude_<slug>.json -- kept out
+    # of here so the aggregator is a pure function safe to unit-test.
     return summary
 
 
