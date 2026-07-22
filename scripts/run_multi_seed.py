@@ -244,9 +244,19 @@ def multi_seed_magnitude(seeds, pair="XAU/USD", interval="1h", source="panel",
     from scripts.train_pairs import run_pair
 
     slug = get_pair(pair).slug
+    _suf = "_harrv" if os.environ.get("FOREX_HAR_RV", "0") == "1" else ""  # HAR variant namespace
     rows = []
     for seed in seeds:
-        print(f"\n{'='*70}\nMAGNITUDE SEED {seed}\n{'='*70}")
+        # Reuse an already-trained per-seed result (non-smoke) instead of
+        # retraining -- lets `--seeds 9 36 99` reuse the done seed 9 and only
+        # train 36/99. Delete the per-seed JSON to force a retrain.
+        pf = f"results/pair_metrics/{slug}_magnitude{_suf}_seed{seed}.json"
+        if os.path.exists(pf):
+            _m = json.load(open(pf))
+            if not _m.get("smoke") and _m.get("magnitude_vs_atr"):
+                print(f"\n[magnitude] seed {seed}: reusing existing result ({pf})")
+                mm = _m["magnitude_vs_atr"]; mm["seed"] = seed; rows.append(mm); continue
+        print(f"\n{'='*70}\nMAGNITUDE SEED {seed}{_suf}\n{'='*70}")
         meta = run_pair(pair, interval=interval, source=source, epochs=epochs,
                         train_stride=train_stride, refit_every=refit_every,
                         device=device, batch_size=batch_size, bars=bars,
@@ -262,7 +272,7 @@ def multi_seed_magnitude(seeds, pair="XAU/USD", interval="1h", source="panel",
         print("[magnitude] no seeds produced scoring -- aborting summary")
         return None
     summary = summarize_magnitude_rows(rows, pair, slug, interval, seeds)
-    out = f"results/multi_seed_magnitude_{slug}.json"
+    out = f"results/multi_seed_magnitude{_suf}_{slug}.json"
     json.dump(summary, open(out, "w"), indent=2, default=float)
     print(f"\nWritten to {out}")
     return summary
