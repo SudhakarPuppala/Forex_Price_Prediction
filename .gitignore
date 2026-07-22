@@ -31,3 +31,6 @@ results/run_multi_seed_error.log
 exports/dashboard/*/magnitude/seed*/hybrid.pt
 exports/dashboard/*/magnitude/seed*/xgb.pkl
 exports/dashboard/*/magnitude/seed*/garch_expert_preds.npz
+
+# Conformal forecast-array cache (regenerable; delete to force pipeline rebuild)
+results/conformal_arrays_*.npz
