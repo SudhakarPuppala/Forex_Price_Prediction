@@ -229,29 +229,6 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
         # Never overwrite the frozen panel from a truncated smoke run.
         save_panel_csv(panel, panel_csv_path(pair))
     tr, va, te = time_split(panel)
-    # ---- feature-group ablation (FOREX_FEATURE_GROUPS) ----
-    # time_split builds ONE shared normalized panel that the datasets AND the
-    # XGBoost feature matrix all read, so zeroing feature columns here removes a
-    # group's information CONSISTENTLY across the whole model pipeline (GARCH is
-    # price-only and correctly unaffected). Zeroing post-normalization sets the
-    # column to 0 = the train mean = a neutral "no information" value. Groups are
-    # contiguous: technical [0:nt], macro [nt:nt+nm], sentiment [nt+nm:].
-    fgroup = os.environ.get("FOREX_FEATURE_GROUPS", "all")
-    if fgroup != "all":
-        nt, nm = DATA_CFG.n_technical_features, DATA_CFG.n_macro_features
-        nT = DATA_CFG.n_total_features
-        keep = np.zeros(nT, dtype=bool); keep[:nt] = True     # technical always kept
-        if fgroup == "tech":            pass
-        elif fgroup == "tech_macro":    keep[nt:nt + nm] = True
-        elif fgroup == "tech_news":     keep[nt + nm:] = True
-        else:
-            raise ValueError(f"FOREX_FEATURE_GROUPS={fgroup!r} not in "
-                             "{all, tech, tech_macro, tech_news}")
-        tr.panel.features[:, ~keep] = 0.0      # shared panel -> masks tr/va/te + xgb
-        print(f"[train_pairs] ABLATION FOREX_FEATURE_GROUPS={fgroup}: keeping "
-              f"{int(keep.sum())}/{nT} feature cols, zeroed {int((~keep).sum())} "
-              f"({'macro' if fgroup=='tech_news' else 'macro+sentiment' if fgroup=='tech' else 'sentiment'})")
-    _abl = "" if fgroup == "all" else f"_{fgroup}"
     if train_stride > 1:
         # Consecutive hourly windows overlap 59/60 bars (~98%), so neighbouring
         # training origins are almost the same sample. Striding the TRAIN/VAL
@@ -392,11 +369,8 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
     if magnitude:
         # keep the magnitude experiment fully separate from the direction
         # checkpoint the dashboard serves; per-seed subdir so a multi-seed
-        # stability run never overwrites another seed's checkpoint. Ablation
-        # runs get their own subdir (magnitude/ablation_<group>/) so they never
-        # clobber the canonical all-features magnitude/seed<N> checkpoints.
-        _seg = f"ablation{_abl}/seed{seed}" if _abl else f"seed{seed}"
-        ckpt = os.path.join(ckpt, "magnitude", _seg)
+        # stability run never overwrites another seed's checkpoint
+        ckpt = os.path.join(ckpt, "magnitude", f"seed{seed}")
         os.makedirs(ckpt, exist_ok=True)
     torch.save(hybrid.state_dict(), os.path.join(ckpt, "hybrid.pt"))
     joblib.dump(xgb.model, os.path.join(ckpt, "xgb.pkl"))
@@ -410,7 +384,6 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
     meta = {
         "pair": cfg.name, "slug": cfg.slug, "label": cfg.label,
         "target": target, "magnitude_vs_atr": mag_metrics,
-        "feature_groups": fgroup,
         "seed": seed, "saved_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "interval": interval,
         # Mark dry runs so a 2-epoch/500-bar checkpoint can never be mistaken
@@ -435,11 +408,7 @@ def run_pair(pair: str, interval: str = "4h", bars: int = None,
     }
     json.dump(meta, open(os.path.join(ckpt, "meta.json"), "w"), indent=2, default=str)
     os.makedirs("results/pair_metrics", exist_ok=True)
-    if magnitude and _abl:
-        # ablation run: keep OUT of the canonical magnitude namespace entirely
-        json.dump(meta, open(f"results/pair_metrics/{cfg.slug}_magnitude{_abl}_seed{seed}.json", "w"),
-                  indent=2, default=float)
-    elif magnitude:
+    if magnitude:
         # always persist a per-seed record; also (re)write the canonical
         # unsuffixed file for the default seed so single-run consumers keep
         # finding results/pair_metrics/<slug>_magnitude.json
