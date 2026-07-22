@@ -135,9 +135,15 @@ GAMMA = 0.02
 print(f"\n--- Adaptive Conformal Inference (ACI, gamma={GAMMA}) ---")
 print(f"{'level':>6s} | {'ACI cov':>8s} {'med width':>10s} {'infinite%':>10s}")
 print("-" * 42)
+# live_state: the ACI controller's END-OF-STREAM per-horizon multiplier q_h, which
+# a fresh out-of-sample forecast should use for its band (mu +/- q_h*sigma). A
+# horizon is "capped" when ACI ran out of calibration scale (regime stress) --
+# we cap q_h at the widest calibration multiplier rather than infinity for the UI.
+live_state = {"pair": PAIR, "slug": SLUG, "gamma": GAMMA, "levels": {}}
 for lvl in LEVELS:
     alpha_t = 1.0 - lvl
     cov_all, wid_all, inf_all = [], [], []
+    q_live, capped = [], []
     for h in range(K):
         cal = np.sort(np.abs(yv[:, h] - muv[:, h]) / sv[:, h])   # sorted calib scores, O(1) quantile
         n = len(cal)
@@ -157,14 +163,29 @@ for lvl in LEVELS:
                 widths.append(2 * half)
             a = a + GAMMA * (alpha_t - (0.0 if cov else 1.0))
         cov_all.append(np.mean(covered)); wid_all += widths; inf_all.append(n_inf / len(yt))
+        # end-of-stream multiplier for the live band (capped at the widest calib score)
+        ae = min(max(a, 0.0), 1.0)
+        if ae <= 0.0:
+            q_live.append(float(cal[-1])); capped.append(True)
+        else:
+            idx = int(np.ceil((1.0 - ae) * (n + 1))) - 1
+            q_live.append(float(cal[min(max(idx, 0), n - 1)])); capped.append(bool(idx >= n - 1))
     cov = float(np.mean(cov_all)); medw = float(np.median(wid_all)); infp = float(np.mean(inf_all))
     print(f"{lvl*100:>5.0f}% | {cov*100:>7.1f}% {medw:>10.5f} {infp*100:>9.1f}%")
     summary["levels"][f"{lvl:.2f}"]["aci_coverage"] = cov
     summary["levels"][f"{lvl:.2f}"]["aci_median_width"] = medw
     summary["levels"][f"{lvl:.2f}"]["aci_infinite_frac"] = infp
+    live_state["levels"][f"{lvl:.2f}"] = {"q_per_horizon": q_live, "capped_horizons": capped}
 
 os.makedirs("results", exist_ok=True)
 json.dump(summary, open(f"results/conformal_{SLUG}.json", "w"), indent=2, default=float)
+import datetime as _dt
+live_state["generated"] = _dt.datetime.now().isoformat(timespec="seconds")
+live_state["note"] = ("ACI end-of-stream per-horizon multipliers for the LIVE band "
+                      "mu +/- q_h*sigma. Calibrated on val, adapted online through test "
+                      f"(ends {SLUG} test). q capped at the widest calib multiplier.")
+json.dump(live_state, open(f"results/conformal_live_state_{SLUG}.json", "w"), indent=2, default=float)
+print(f"live-state multipliers written to results/conformal_live_state_{SLUG}.json")
 print("\nread: split-conformal under-covers under the val->test volatility regime")
 print("shift; ACI adapts online and should track its target (widening intervals,")
 print("occasionally to infinity, during the shifted regime).")

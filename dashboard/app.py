@@ -851,11 +851,28 @@ elif page.startswith("🔮"):
         # forecast is cumulative log-return per horizon -> predicted price level
         price_path = F["last_close"] * np.exp(fc)
         lf = go.Figure()
+        _conf = None
         if bd is not None:
-            lf.add_trace(go.Scatter(x=np.r_[h, h[::-1]],
-                                    y=np.r_[F["last_close"]*np.exp(fc+bd), (F["last_close"]*np.exp(fc-bd))[::-1]],
-                                    fill="toself", fillcolor="rgba(5,150,105,0.15)", line=dict(width=0),
-                                    name="uncertainty band"))
+            # ACI-calibrated conformal band (mu +/- q_h*sigma) when the offline
+            # live-state exists for this pair; else fall back to the raw sigma band.
+            cs = load_json(f"results/conformal_live_state_{PCFG.slug}.json")
+            _lvl = "0.90"
+            if cs and _lvl in cs.get("levels", {}):
+                qv = np.asarray(cs["levels"][_lvl]["q_per_horizon"], dtype=float)[:len(fc)]
+                lf.add_trace(go.Scatter(x=np.r_[h, h[::-1]],
+                    y=np.r_[F["last_close"]*np.exp(fc + qv*bd), (F["last_close"]*np.exp(fc - qv*bd))[::-1]],
+                    fill="toself", fillcolor="rgba(5,150,105,0.18)", line=dict(width=0),
+                    name="90% conformal band (ACI)"))
+                lf.add_trace(go.Scatter(x=np.r_[h, h[::-1]],
+                    y=np.r_[F["last_close"]*np.exp(fc + bd), (F["last_close"]*np.exp(fc - bd))[::-1]],
+                    fill="toself", fillcolor="rgba(100,116,139,0.13)", line=dict(width=0),
+                    name="raw σ (uncalibrated ~68%)"))
+                _conf = (qv, cs.get("levels", {}).get(_lvl, {}))
+            else:
+                lf.add_trace(go.Scatter(x=np.r_[h, h[::-1]],
+                    y=np.r_[F["last_close"]*np.exp(fc+bd), (F["last_close"]*np.exp(fc-bd))[::-1]],
+                    fill="toself", fillcolor="rgba(5,150,105,0.15)", line=dict(width=0),
+                    name="uncertainty band"))
         lf.add_trace(go.Scatter(x=np.r_[0, h], y=np.r_[F["last_close"], price_path],
                                 name="predicted price", line=dict(color=GREEN, width=3)))
         lf.update_layout(height=320, template="plotly_white", margin=dict(l=0, r=0, t=10, b=0),
@@ -865,7 +882,25 @@ elif page.startswith("🔮"):
         cc = st.columns(3)
         metric_card(cc[0], "Next-day direction", d1, GREEN if d1 == "BUY" else AMBER)
         metric_card(cc[1], "10-bar (10h) predicted move", f"{(np.exp(fc[-1])-1)*100:+.2f}%", TEAL, "cumulative")
-        metric_card(cc[2], "Predicted price (t+10)", f"${price_path[-1]:,.2f}", NAVY, f"from ${F['last_close']:,.2f}")
+        if _conf is not None:
+            qv, _cinfo = _conf
+            lo = F["last_close"] * float(np.exp(fc[-1] - qv[-1] * bd[-1]))
+            hi = F["last_close"] * float(np.exp(fc[-1] + qv[-1] * bd[-1]))
+            metric_card(cc[2], "90% conformal range (t+10)", f"${lo:,.0f} – ${hi:,.0f}",
+                        GREEN, f"point ${price_path[-1]:,.0f}")
+        else:
+            metric_card(cc[2], "Predicted price (t+10)", f"${price_path[-1]:,.2f}", NAVY,
+                        f"from ${F['last_close']:,.2f}")
+        if _conf is not None:
+            _capn = sum(_conf[1].get("capped_horizons", []))
+            st.caption(
+                "The green band is a **90% conformal prediction interval (Adaptive Conformal "
+                "Inference)** — distribution-free, with ~90% empirical test coverage, vs the raw "
+                "Gaussian σ band (grey) which under-covers at ~73%. The interval widens with "
+                "horizon and in high-volatility regimes; ACI adapts its width online to hold "
+                "coverage under regime shift (e.g. the 2024-26 gold rally)."
+                + (f" ⚠️ {_capn}/10 horizons are at the calibration-scale cap (regime stress)."
+                   if _capn else ""))
         st.caption("Price and macro are fetched **live**; news uses the up-to-date **cached archive** by default "
                    "(tick the box to also pull fresh headlines live). News coverage is inherently sparse "
                    "(~14/60 days) — the main limit on the sentiment signal. Directional accuracy on live data "

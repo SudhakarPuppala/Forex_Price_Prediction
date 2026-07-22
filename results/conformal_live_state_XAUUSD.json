@@ -1,0 +1,87 @@
+{
+  "pair": "XAU/USD",
+  "slug": "XAUUSD",
+  "gamma": 0.02,
+  "levels": {
+    "0.80": {
+      "q_per_horizon": [
+        1.4487311840057373,
+        1.6001980304718018,
+        1.6215555667877197,
+        1.7362862825393677,
+        1.76300048828125,
+        2.107865333557129,
+        2.536691665649414,
+        2.6353237628936768,
+        2.390455484390259,
+        2.4072015285491943
+      ],
+      "capped_horizons": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    "0.90": {
+      "q_per_horizon": [
+        2.4316070079803467,
+        1.9744596481323242,
+        2.3178305625915527,
+        2.09781551361084,
+        1.943602442741394,
+        2.7855663299560547,
+        3.631800651550293,
+        2.86946177482605,
+        2.9245893955230713,
+        2.972252607345581
+      ],
+      "capped_horizons": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    "0.95": {
+      "q_per_horizon": [
+        3.8292791843414307,
+        2.5300590991973877,
+        2.629326581954956,
+        2.765378952026367,
+        2.859694480895996,
+        3.02877140045166,
+        3.0763401985168457,
+        3.0801684856414795,
+        3.0900487899780273,
+        3.1691243648529053
+      ],
+      "capped_horizons": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  },
+  "generated": "2026-07-23T04:02:46",
+  "note": "ACI end-of-stream per-horizon multipliers for the LIVE band mu +/- q_h*sigma. Calibrated on val, adapted online through test (ends XAUUSD test). q capped at the widest calib multiplier."
+}
