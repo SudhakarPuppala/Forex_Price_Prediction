@@ -37,3 +37,8 @@ results/conformal_arrays_*.npz
 
 # Significance-test forecast-array cache (regenerable)
 results/significance_arrays_*.npz
+
+# HAR-RV magnitude checkpoint binaries (regenerable; metrics JSON kept)
+exports/dashboard/*/magnitude_harrv/seed*/hybrid.pt
+exports/dashboard/*/magnitude_harrv/seed*/xgb.pkl
+exports/dashboard/*/magnitude_harrv/seed*/garch_expert_preds.npz
